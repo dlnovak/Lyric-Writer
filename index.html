@@ -1,79 +1,62 @@
-import { useState, useEffect, useRef } from "react";
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Lyric Writer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Special+Elite&family=Playfair+Display:ital,wght@0,400;0,700;1,400;1,700&family=IM+Fell+English:ital@0;1&family=Josefin+Sans:wght@300;400;600&family=Abril+Fatface&family=Courier+Prime:ital,wght@0,400;0,700;1,400&family=Lora:ital,wght@0,400;0,600;1,400&family=Raleway:wght@300;400;600&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html,body{overflow-x:hidden;background:#ede0c0;}
+  #root{min-height:100vh;}
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useRef } = React;
 
 const THEMES = {
   parchment: {
-    name: "Parchment",
-    bg: "#ede0c0",
-    surface: "#f5ecd6",
-    toolbar: "#e8d8b0",
-    border: "#c4a86a",
-    text: "#2a160a",
-    muted: "#8c6a3a",
-    accent: "#8b4513",
-    accentText: "#ffffff",
-    titlePlaceholder: "#b89a60",
-    paperLines: "rgba(139,90,43,0.12)",
-    paperEffect: "texture",
+    name: "Parchment", bg: "#ede0c0", surface: "#f5ecd6", toolbar: "#e8d8b0",
+    border: "#c4a86a", text: "#2a160a", muted: "#8c6a3a", accent: "#8b4513",
+    accentText: "#ffffff", titlePlaceholder: "#b89a60",
+    paperLines: "rgba(139,90,43,0.12)", paperEffect: "texture",
     defaultFont: "'IM Fell English', serif",
   },
   midnight: {
-    name: "Midnight",
-    bg: "#0b0c14",
-    surface: "#10111c",
-    toolbar: "#0d0e18",
-    border: "#252640",
-    text: "#d8d4f0",
-    muted: "#4a4a70",
-    accent: "#7c5cfc",
-    accentText: "#ffffff",
-    titlePlaceholder: "#3a3a5a",
-    paperLines: null,
-    paperEffect: "grain",
+    name: "Midnight", bg: "#0b0c14", surface: "#10111c", toolbar: "#0d0e18",
+    border: "#252640", text: "#d8d4f0", muted: "#4a4a70", accent: "#7c5cfc",
+    accentText: "#ffffff", titlePlaceholder: "#3a3a5a",
+    paperLines: null, paperEffect: "grain",
     defaultFont: "'Special Elite', cursive",
   },
   neon: {
-    name: "Neon",
-    bg: "#03050a",
-    surface: "#060c14",
-    toolbar: "#020408",
-    border: "#00331a",
-    text: "#00f5a0",
-    muted: "#005533",
-    accent: "#ff2d78",
-    accentText: "#ffffff",
-    titlePlaceholder: "#004422",
-    paperLines: null,
-    paperEffect: "scanlines",
+    name: "Neon", bg: "#03050a", surface: "#060c14", toolbar: "#020408",
+    border: "#00331a", text: "#00f5a0", muted: "#005533", accent: "#ff2d78",
+    accentText: "#ffffff", titlePlaceholder: "#004422",
+    paperLines: null, paperEffect: "scanlines",
     defaultFont: "'Josefin Sans', sans-serif",
   },
   daylight: {
-    name: "Daylight",
-    bg: "#f7f4f0",
-    surface: "#ffffff",
-    toolbar: "#f0ece6",
-    border: "#ddd5c8",
-    text: "#18130e",
-    muted: "#a09080",
-    accent: "#c0392b",
-    accentText: "#ffffff",
-    titlePlaceholder: "#ccc0b0",
-    paperLines: null,
-    paperEffect: "clean",
+    name: "Daylight", bg: "#f7f4f0", surface: "#ffffff", toolbar: "#f0ece6",
+    border: "#ddd5c8", text: "#18130e", muted: "#a09080", accent: "#c0392b",
+    accentText: "#ffffff", titlePlaceholder: "#ccc0b0",
+    paperLines: null, paperEffect: "clean",
     defaultFont: "'Playfair Display', serif",
   },
   dusk: {
-    name: "Dusk",
-    bg: "#110b1e",
-    surface: "#1a1030",
-    toolbar: "#0e0918",
-    border: "#2e1f50",
-    text: "#ffcb80",
-    muted: "#5a3a6a",
-    accent: "#ff6b35",
-    accentText: "#ffffff",
-    titlePlaceholder: "#3a2450",
-    paperLines: null,
-    paperEffect: "glow",
+    name: "Dusk", bg: "#110b1e", surface: "#1a1030", toolbar: "#0e0918",
+    border: "#2e1f50", text: "#ffcb80", muted: "#5a3a6a", accent: "#ff6b35",
+    accentText: "#ffffff", titlePlaceholder: "#3a2450",
+    paperLines: null, paperEffect: "glow",
     defaultFont: "'Abril Fatface', cursive",
   },
 };
@@ -91,18 +74,17 @@ const FONTS = [
 
 const FONT_SIZES = [12, 14, 16, 18, 20, 24, 28, 32];
 
-// Outline SVG icons for each theme
 const THEME_ICONS = {
-  midnight: (
-    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>
-    </svg>
-  ),
   parchment: (
     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
       <path d="M5 4h12a2 2 0 0 1 2 2v14H7a2 2 0 0 1-2-2V4z"/>
       <path d="M5 4v14a2 2 0 0 0 2 2"/>
       <path d="M9 8h7M9 12h7M9 16h5"/>
+    </svg>
+  ),
+  midnight: (
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>
     </svg>
   ),
   neon: (
@@ -126,11 +108,24 @@ const THEME_ICONS = {
   ),
 };
 
+const STORAGE_KEY = "lyricwriter:songs";
+
+function loadAllSongs() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch { return {}; }
+}
+
+function saveAllSongs(songs) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(songs)); } catch {}
+}
+
 function formatDate(ts) {
   return new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
 
-export default function LyricWriter() {
+function LyricWriter() {
   const [themeKey, setThemeKey] = useState("parchment");
   const [font, setFont] = useState(THEMES.parchment.defaultFont);
   const [fontSize, setFontSize] = useState(18);
@@ -144,91 +139,66 @@ export default function LyricWriter() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [saveFlash, setSaveFlash] = useState(false);
   const [currentKey, setCurrentKey] = useState(null);
-  const textRef = useRef(null);
   const t = THEMES[themeKey];
 
-  useEffect(() => {
-    loadSavedList();
-  }, []);
+  useEffect(() => { refreshList(); }, []);
 
-  async function loadSavedList() {
-    try {
-      const result = await window.storage.list("lyric:");
-      if (!result?.keys?.length) return;
-      const songs = [];
-      for (const key of result.keys) {
-        try {
-          const item = await window.storage.get(key);
-          if (item) {
-            const d = JSON.parse(item.value);
-            songs.push({ key, title: d.title || "Untitled", date: d.date || 0 });
-          }
-        } catch {}
-      }
-      setSavedSongs(songs.sort((a, b) => b.date - a.date));
-    } catch {}
+  function refreshList() {
+    const all = loadAllSongs();
+    const arr = Object.entries(all).map(([key, d]) => ({
+      key, title: d.title || "Untitled", date: d.date || 0,
+    })).sort((a, b) => b.date - a.date);
+    setSavedSongs(arr);
   }
 
-  async function handleSave() {
-    const key = currentKey || `lyric:${Date.now()}`;
-    const data = { title: title || "Untitled", content, themeKey, font, fontSize, align, bold, italic, underline, date: Date.now() };
-    try {
-      await window.storage.set(key, JSON.stringify(data));
-      if (!currentKey) setCurrentKey(key);
-      setSaveFlash(true);
-      setTimeout(() => setSaveFlash(false), 1600);
-      loadSavedList();
-    } catch {}
+  function handleSave() {
+    const all = loadAllSongs();
+    const key = currentKey || `song_${Date.now()}`;
+    all[key] = {
+      title: title || "Untitled", content, themeKey, font, fontSize,
+      align, bold, italic, underline, date: Date.now(),
+    };
+    saveAllSongs(all);
+    if (!currentKey) setCurrentKey(key);
+    setSaveFlash(true);
+    setTimeout(() => setSaveFlash(false), 1600);
+    refreshList();
   }
 
-  async function handleLoad(key) {
-    try {
-      const item = await window.storage.get(key);
-      if (item) {
-        const d = JSON.parse(item.value);
-        setTitle(d.title || "");
-        setContent(d.content || "");
-        setThemeKey(d.themeKey || "midnight");
-        setFont(d.font || THEMES[d.themeKey || "midnight"].defaultFont);
-        setFontSize(d.fontSize || 18);
-        setAlign(d.align || "left");
-        setBold(d.bold || false);
-        setItalic(d.italic || false);
-        setUnderline(d.underline || false);
-        setCurrentKey(key);
-        setDrawerOpen(false);
-      }
-    } catch {}
+  function handleLoad(key) {
+    const all = loadAllSongs();
+    const d = all[key];
+    if (!d) return;
+    setTitle(d.title || "");
+    setContent(d.content || "");
+    setThemeKey(d.themeKey || "parchment");
+    setFont(d.font || THEMES[d.themeKey || "parchment"].defaultFont);
+    setFontSize(d.fontSize || 18);
+    setAlign(d.align || "left");
+    setBold(d.bold || false);
+    setItalic(d.italic || false);
+    setUnderline(d.underline || false);
+    setCurrentKey(key);
+    setDrawerOpen(false);
   }
 
-  async function handleDelete(e, key) {
+  function handleDelete(e, key) {
     e.stopPropagation();
-    try {
-      await window.storage.delete(key);
-      if (key === currentKey) setCurrentKey(null);
-      loadSavedList();
-    } catch {}
+    const all = loadAllSongs();
+    delete all[key];
+    saveAllSongs(all);
+    if (key === currentKey) setCurrentKey(null);
+    refreshList();
   }
 
   function handleNew() {
-    setTitle("");
-    setContent("");
-    setCurrentKey(null);
+    setTitle(""); setContent(""); setCurrentKey(null);
   }
 
   function switchTheme(key) {
     setThemeKey(key);
     setFont(THEMES[key].defaultFont);
   }
-
-  const paperStyle = () => {
-    if (t.paperEffect === "lines" || t.paperLines) {
-      return {
-        backgroundImage: `repeating-linear-gradient(transparent, transparent 31px, ${t.paperLines} 31px, ${t.paperLines} 32px)`,
-      };
-    }
-    return {};
-  };
 
   const textShadow = () => {
     if (themeKey === "neon") return `0 0 8px ${t.text}99`;
@@ -240,258 +210,57 @@ export default function LyricWriter() {
   const lineCount = content ? content.split("\n").length : 0;
 
   return (
-    <>
+    <React.Fragment>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Special+Elite&family=Playfair+Display:ital,wght@0,400;0,700;1,400;1,700&family=IM+Fell+English:ital@0;1&family=Josefin+Sans:wght@300;400;600&family=Abril+Fatface&family=Courier+Prime:ital,wght@0,400;0,700;1,400&family=Lora:ital,wght@0,400;0,600;1,400&family=Raleway:wght@300;400;600&display=swap');
-        *{box-sizing:border-box;margin:0;padding:0;}
-        body{overflow-x:hidden;}
-        .lw-app{
-          min-height:100vh;
-          background:${t.bg};
-          color:${t.text};
-          transition:background 0.35s,color 0.35s;
-          display:flex;
-          flex-direction:column;
-        }
-        .lw-toolbar{
-          background:${t.toolbar};
-          border-bottom:1px solid ${t.border};
-          padding:8px 16px;
-          display:flex;
-          align-items:center;
-          gap:6px;
-          flex-wrap:wrap;
-          position:sticky;
-          top:0;
-          z-index:50;
-        }
+        .lw-app{min-height:100vh;background:${t.bg};color:${t.text};transition:background 0.35s,color 0.35s;display:flex;flex-direction:column;font-family:system-ui,sans-serif;}
+        .lw-toolbar{background:${t.toolbar};border-bottom:1px solid ${t.border};padding:8px 16px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;position:sticky;top:0;z-index:50;}
         .lw-sep{width:1px;height:22px;background:${t.border};flex-shrink:0;margin:0 2px;}
-        .tb-btn{
-          background:transparent;
-          border:1px solid ${t.border};
-          color:${t.text};
-          padding:4px 9px;
-          cursor:pointer;
-          font-size:12px;
-          border-radius:4px;
-          transition:background 0.12s,border-color 0.12s;
-          font-family:system-ui,sans-serif;
-          line-height:1.4;
-          white-space:nowrap;
-        }
+        .tb-btn{background:transparent;border:1px solid ${t.border};color:${t.text};padding:4px 9px;cursor:pointer;font-size:12px;border-radius:4px;transition:background 0.12s,border-color 0.12s;font-family:system-ui,sans-serif;line-height:1.4;white-space:nowrap;}
         .tb-btn:hover{background:${t.border};}
         .tb-btn.on{background:${t.accent};border-color:${t.accent};color:${t.accentText};}
-        .tb-select{
-          background:${t.toolbar};
-          border:1px solid ${t.border};
-          color:${t.text};
-          padding:4px 6px;
-          font-size:12px;
-          border-radius:4px;
-          outline:none;
-          cursor:pointer;
-          font-family:system-ui,sans-serif;
-          max-width:150px;
-        }
-        .lw-save-btn{
-          background:${t.accent};
-          border:none;
-          color:${t.accentText};
-          padding:5px 18px;
-          cursor:pointer;
-          font-size:12px;
-          border-radius:4px;
-          font-family:system-ui,sans-serif;
-          font-weight:700;
-          letter-spacing:0.05em;
-          transition:opacity 0.15s,transform 0.1s;
-          margin-left:auto;
-          flex-shrink:0;
-        }
+        .tb-select{background:${t.toolbar};border:1px solid ${t.border};color:${t.text};padding:4px 6px;font-size:12px;border-radius:4px;outline:none;cursor:pointer;font-family:system-ui,sans-serif;max-width:150px;}
+        .lw-save-btn{background:${t.accent};border:none;color:${t.accentText};padding:5px 18px;cursor:pointer;font-size:12px;border-radius:4px;font-family:system-ui,sans-serif;font-weight:700;letter-spacing:0.05em;transition:opacity 0.15s,transform 0.1s;margin-left:auto;flex-shrink:0;}
         .lw-save-btn:hover{opacity:0.85;}
         .lw-save-btn.flash{transform:scale(0.96);opacity:0.7;}
-        .theme-icon{
-          width:28px;height:28px;
-          display:flex;align-items:center;justify-content:center;
-          border-radius:4px;
-          cursor:pointer;
-          border:1px solid ${t.border};
-          background:transparent;
-          color:${t.muted};
-          transition:color 0.15s,border-color 0.15s,background 0.15s;
-          flex-shrink:0;
-          padding:0;
-        }
+        .theme-icon{width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:4px;cursor:pointer;border:1px solid ${t.border};background:transparent;color:${t.muted};transition:color 0.15s,border-color 0.15s,background 0.15s;flex-shrink:0;padding:0;}
         .theme-icon:hover{color:${t.text};border-color:${t.text};}
-        .theme-icon.active{
-          color:${t.text};
-          border-color:${t.text};
-          background:${t.border};
-        }
-        .lw-body{
-          display:flex;
-          flex-direction:column;
-          align-items:center;
-          padding:32px 20px 60px;
-          flex:1;
-        }
-        .lw-title-wrap{
-          width:100%;max-width:680px;
-          margin-bottom:4px;
-        }
-        .lw-title{
-          background:transparent;
-          border:none;
-          border-bottom:1px solid ${t.border};
-          color:${t.text};
-          font-family:${font};
-          font-size:26px;
-          font-weight:bold;
-          width:100%;
-          padding:6px 2px 10px;
-          outline:none;
-          transition:border-color 0.2s;
-          text-shadow:${textShadow()};
-        }
+        .theme-icon.active{color:${t.text};border-color:${t.text};background:${t.border};}
+        .lw-body{display:flex;flex-direction:column;align-items:center;padding:32px 20px 60px;flex:1;}
+        .lw-title-wrap{width:100%;max-width:680px;margin-bottom:4px;}
+        .lw-title{background:transparent;border:none;border-bottom:1px solid ${t.border};color:${t.text};font-family:${font};font-size:26px;font-weight:bold;width:100%;padding:6px 2px 10px;outline:none;transition:border-color 0.2s;text-shadow:${textShadow()};}
         .lw-title::placeholder{color:${t.titlePlaceholder};}
         .lw-title:focus{border-bottom-color:${t.accent};}
-        .lw-paper{
-          width:100%;
-          max-width:680px;
-          min-height:520px;
-          background:${t.surface};
-          position:relative;
-          overflow:hidden;
-          border-radius:2px;
-          margin-top:16px;
+        .lw-paper{width:100%;max-width:680px;min-height:520px;background:${t.surface};position:relative;overflow:hidden;border-radius:2px;margin-top:16px;
           ${themeKey === "neon" ? `border:1px solid ${t.border};box-shadow:0 0 24px ${t.text}0a,inset 0 0 40px rgba(0,0,0,0.5);` : ""}
           ${themeKey === "midnight" ? `box-shadow:0 8px 48px rgba(0,0,0,0.6);` : ""}
           ${themeKey === "daylight" ? `box-shadow:0 2px 24px rgba(0,0,0,0.08);border:1px solid ${t.border};` : ""}
           ${themeKey === "parchment" ? `box-shadow:2px 4px 20px rgba(100,60,10,0.2);` : ""}
           ${themeKey === "dusk" ? `box-shadow:0 8px 48px rgba(80,20,120,0.3);border:1px solid ${t.border};` : ""}
         }
-        ${themeKey === "parchment" ? `
-          .lw-paper::before{
-            content:'';position:absolute;inset:0;pointer-events:none;
-            background-image:repeating-linear-gradient(transparent,transparent 31px,rgba(139,90,43,0.1) 31px,rgba(139,90,43,0.1) 32px);
-          }
-        ` : ""}
-        ${themeKey === "neon" ? `
-          .lw-paper::after{
-            content:'';position:absolute;inset:0;pointer-events:none;z-index:1;
-            background:repeating-linear-gradient(0deg,rgba(0,245,160,0.015) 0px,rgba(0,245,160,0.015) 1px,transparent 1px,transparent 3px);
-          }
-        ` : ""}
-        .lw-textarea{
-          display:block;
-          position:relative;z-index:2;
-          width:100%;
-          min-height:520px;
-          padding:36px 44px;
-          background:transparent;
-          border:none;
-          outline:none;
-          resize:none;
-          font-family:${font};
-          font-size:${fontSize}px;
-          font-weight:${bold ? "700" : "400"};
-          font-style:${italic ? "italic" : "normal"};
-          text-decoration:${underline ? "underline" : "none"};
-          text-align:${align};
-          color:${t.text};
-          line-height:1.9;
-          letter-spacing:0.02em;
-          text-shadow:${textShadow()};
-          transition:font-family 0.1s,font-size 0.1s;
-        }
+        ${themeKey === "parchment" ? `.lw-paper::before{content:'';position:absolute;inset:0;pointer-events:none;background-image:repeating-linear-gradient(transparent,transparent 31px,rgba(139,90,43,0.1) 31px,rgba(139,90,43,0.1) 32px);}` : ""}
+        ${themeKey === "neon" ? `.lw-paper::after{content:'';position:absolute;inset:0;pointer-events:none;z-index:1;background:repeating-linear-gradient(0deg,rgba(0,245,160,0.015) 0px,rgba(0,245,160,0.015) 1px,transparent 1px,transparent 3px);}` : ""}
+        .lw-textarea{display:block;position:relative;z-index:2;width:100%;min-height:520px;padding:36px 44px;background:transparent;border:none;outline:none;resize:none;font-family:${font};font-size:${fontSize}px;font-weight:${bold ? "700" : "400"};font-style:${italic ? "italic" : "normal"};text-decoration:${underline ? "underline" : "none"};text-align:${align};color:${t.text};line-height:1.9;letter-spacing:0.02em;text-shadow:${textShadow()};transition:font-family 0.1s,font-size 0.1s;}
         .lw-textarea::placeholder{color:${t.muted};font-style:italic;}
-        .lw-meta{
-          width:100%;max-width:680px;
-          margin-top:10px;
-          display:flex;gap:16px;
-          font-family:system-ui,sans-serif;
-          font-size:11px;
-          color:${t.muted};
-        }
-        .lw-drawer-overlay{
-          position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:100;
-        }
-        .lw-drawer{
-          position:fixed;top:0;right:0;
-          width:300px;height:100vh;
-          background:${t.toolbar};
-          border-left:1px solid ${t.border};
-          z-index:101;
-          display:flex;flex-direction:column;
-          box-shadow:-4px 0 24px rgba(0,0,0,0.4);
-        }
-        .lw-drawer-head{
-          padding:16px 16px 12px;
-          border-bottom:1px solid ${t.border};
-          display:flex;align-items:center;justify-content:space-between;
-        }
-        .lw-drawer-title{
-          font-family:system-ui,sans-serif;
-          font-size:13px;font-weight:700;
-          letter-spacing:0.12em;text-transform:uppercase;
-          color:${t.text};
-        }
-        .lw-drawer-list{
-          flex:1;overflow-y:auto;padding:12px;
-          display:flex;flex-direction:column;gap:6px;
-        }
-        .song-row{
-          padding:12px;
-          border:1px solid ${t.border};
-          border-radius:4px;
-          cursor:pointer;
-          display:flex;align-items:center;justify-content:space-between;
-          transition:background 0.12s;
-        }
+        .lw-meta{width:100%;max-width:680px;margin-top:10px;display:flex;gap:16px;font-family:system-ui,sans-serif;font-size:11px;color:${t.muted};}
+        .lw-drawer-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:100;}
+        .lw-drawer{position:fixed;top:0;right:0;width:300px;height:100vh;background:${t.toolbar};border-left:1px solid ${t.border};z-index:101;display:flex;flex-direction:column;box-shadow:-4px 0 24px rgba(0,0,0,0.4);}
+        .lw-drawer-head{padding:16px 16px 12px;border-bottom:1px solid ${t.border};display:flex;align-items:center;justify-content:space-between;}
+        .lw-drawer-title{font-family:system-ui,sans-serif;font-size:13px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:${t.text};}
+        .lw-drawer-list{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:6px;}
+        .song-row{padding:12px;border:1px solid ${t.border};border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;transition:background 0.12s;}
         .song-row:hover{background:${t.border};}
         .song-row-info{flex:1;min-width:0;}
-        .song-row-title{
-          font-family:${font};
-          font-size:14px;color:${t.text};
-          white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-        }
-        .song-row-date{
-          font-size:10px;color:${t.muted};
-          font-family:system-ui,sans-serif;margin-top:2px;
-        }
-        .song-del{
-          background:transparent;border:none;
-          color:${t.muted};cursor:pointer;
-          font-size:18px;line-height:1;padding:2px 6px;
-          transition:color 0.12s;flex-shrink:0;
-        }
+        .song-row-title{font-family:${font};font-size:14px;color:${t.text};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+        .song-row-date{font-size:10px;color:${t.muted};font-family:system-ui,sans-serif;margin-top:2px;}
+        .song-del{background:transparent;border:none;color:${t.muted};cursor:pointer;font-size:18px;line-height:1;padding:2px 6px;transition:color 0.12s;flex-shrink:0;}
         .song-del:hover{color:#e53935;}
-        .lw-empty{
-          text-align:center;padding:40px 20px;
-          font-family:system-ui,sans-serif;
-          font-size:13px;color:${t.muted};
-          line-height:1.6;
-        }
-        .lw-new-btn{
-          margin:12px;
-          padding:10px;
-          background:transparent;
-          border:1px dashed ${t.border};
-          border-radius:4px;
-          color:${t.muted};
-          font-family:system-ui,sans-serif;
-          font-size:12px;
-          cursor:pointer;
-          transition:color 0.12s,border-color 0.12s;
-          letter-spacing:0.05em;
-        }
+        .lw-empty{text-align:center;padding:40px 20px;font-family:system-ui,sans-serif;font-size:13px;color:${t.muted};line-height:1.6;}
+        .lw-new-btn{margin:12px;padding:10px;background:transparent;border:1px dashed ${t.border};border-radius:4px;color:${t.muted};font-family:system-ui,sans-serif;font-size:12px;cursor:pointer;transition:color 0.12s,border-color 0.12s;letter-spacing:0.05em;}
         .lw-new-btn:hover{color:${t.text};border-color:${t.text};}
       `}</style>
 
       <div className="lw-app">
-        {/* Toolbar */}
         <div className="lw-toolbar">
-          {/* Theme icons */}
           {Object.entries(THEMES).map(([key, th]) => (
             <button
               key={key}
@@ -506,30 +275,22 @@ export default function LyricWriter() {
 
           <div className="lw-sep" />
 
-          {/* Font */}
           <select className="tb-select" value={font} onChange={e => setFont(e.target.value)}>
-            {FONTS.map(f => (
-              <option key={f.value} value={f.value}>{f.label}</option>
-            ))}
+            {FONTS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
           </select>
 
-          {/* Font size */}
           <select className="tb-select" style={{ maxWidth: 64 }} value={fontSize} onChange={e => setFontSize(Number(e.target.value))}>
-            {FONT_SIZES.map(s => (
-              <option key={s} value={s}>{s}</option>
-            ))}
+            {FONT_SIZES.map(s => <option key={s} value={s}>{s}</option>)}
           </select>
 
           <div className="lw-sep" />
 
-          {/* Style */}
           <button className={`tb-btn ${bold ? "on" : ""}`} onClick={() => setBold(!bold)} style={{ fontWeight: "bold" }}>B</button>
           <button className={`tb-btn ${italic ? "on" : ""}`} onClick={() => setItalic(!italic)} style={{ fontStyle: "italic" }}>I</button>
           <button className={`tb-btn ${underline ? "on" : ""}`} onClick={() => setUnderline(!underline)} style={{ textDecoration: "underline" }}>U</button>
 
           <div className="lw-sep" />
 
-          {/* Alignment */}
           <button className={`tb-btn ${align === "left" ? "on" : ""}`} onClick={() => setAlign("left")} title="Align left">⬅</button>
           <button className={`tb-btn ${align === "center" ? "on" : ""}`} onClick={() => setAlign("center")} title="Center">↔</button>
           <button className={`tb-btn ${align === "right" ? "on" : ""}`} onClick={() => setAlign("right")} title="Align right">➡</button>
@@ -537,14 +298,13 @@ export default function LyricWriter() {
           <div className="lw-sep" />
 
           <button className="tb-btn" onClick={handleNew}>New</button>
-          <button className="tb-btn" onClick={() => { setDrawerOpen(true); loadSavedList(); }}>Songs</button>
+          <button className="tb-btn" onClick={() => { setDrawerOpen(true); refreshList(); }}>Songs</button>
 
           <button className={`lw-save-btn${saveFlash ? " flash" : ""}`} onClick={handleSave}>
             {saveFlash ? "Saved ✓" : "Save"}
           </button>
         </div>
 
-        {/* Writing area */}
         <div className="lw-body">
           <div className="lw-title-wrap">
             <input
@@ -557,7 +317,6 @@ export default function LyricWriter() {
 
           <div className="lw-paper">
             <textarea
-              ref={textRef}
               className="lw-textarea"
               value={content}
               onChange={e => setContent(e.target.value)}
@@ -574,9 +333,8 @@ export default function LyricWriter() {
         </div>
       </div>
 
-      {/* Songs drawer */}
       {drawerOpen && (
-        <>
+        <React.Fragment>
           <div className="lw-drawer-overlay" onClick={() => setDrawerOpen(false)} />
           <div className="lw-drawer">
             <div className="lw-drawer-head">
@@ -604,8 +362,14 @@ export default function LyricWriter() {
               + New Song
             </button>
           </div>
-        </>
+        </React.Fragment>
       )}
-    </>
+    </React.Fragment>
   );
 }
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<LyricWriter />);
+</script>
+</body>
+</html>
