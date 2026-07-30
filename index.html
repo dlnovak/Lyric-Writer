@@ -11,125 +11,1049 @@
   *{box-sizing:border-box;margin:0;padding:0;}
   html,body{overflow-x:hidden;background:#ede0c0;}
   #root{min-height:100vh;}
+  .boot{padding:40px;font-family:system-ui,sans-serif;color:#2a160a;line-height:1.6;}
 </style>
 </head>
 <body>
-<div id="root"></div>
+<div id="root"><div class="boot">Loading Lyric Writer&hellip;</div></div>
 
-<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<!-- ============================================================
+     FIREBASE CONFIG — paste yours here.
+     Firebase Console -> Project settings -> Your apps -> Web app
+     Leave the placeholders alone and the app still works,
+     storing everything locally in this browser.
+     ============================================================ -->
+<script>
+  window.FIREBASE_CONFIG = {
+    apiKey: "PASTE_API_KEY_HERE",
+    authDomain: "PASTE_AUTH_DOMAIN_HERE",
+    projectId: "PASTE_PROJECT_ID_HERE",
+    storageBucket: "PASTE_STORAGE_BUCKET_HERE",
+    messagingSenderId: "PASTE_SENDER_ID_HERE",
+    appId: "PASTE_APP_ID_HERE"
+  };
+</script>
 
-<script type="text/babel" data-presets="react">
-const { useState, useEffect, useRef } = React;
+<!-- Storage layer: localStorage always, Firestore when signed in -->
+<script>
+window.Store = {
+  uid: "guest",
+  setUid: function (u) { this.uid = u || "guest"; },
+  lsKey: function (kind) { return "lyricwriter:" + this.uid + ":" + kind; },
+  readLocal: function (kind) {
+    try { return JSON.parse(localStorage.getItem(this.lsKey(kind))) || {}; }
+    catch (e) { return {}; }
+  },
+  writeLocal: function (kind, obj) {
+    try { localStorage.setItem(this.lsKey(kind), JSON.stringify(obj)); } catch (e) {}
+  },
+  col: function (kind) {
+    if (!window.fbDb || this.uid === "guest") return null;
+    return window.fbDb.collection("users").doc(this.uid).collection(kind);
+  },
+  list: async function (kind) {
+    var local = this.readLocal(kind);
+    var c = this.col(kind);
+    if (c) {
+      try {
+        var snap = await c.get();
+        var remote = {};
+        snap.forEach(function (d) { remote[d.id] = d.data(); });
+        var merged = Object.assign({}, local, remote);
+        this.writeLocal(kind, merged);
+        return merged;
+      } catch (e) { console.warn("Firestore read failed, using local copy:", e); }
+    }
+    return local;
+  },
+  set: async function (kind, id, data) {
+    var all = this.readLocal(kind);
+    all[id] = data;
+    this.writeLocal(kind, all);
+    var c = this.col(kind);
+    if (c) { try { await c.doc(id).set(data); } catch (e) { console.warn("Firestore write failed:", e); } }
+  },
+  remove: async function (kind, id) {
+    var all = this.readLocal(kind);
+    delete all[id];
+    this.writeLocal(kind, all);
+    var c = this.col(kind);
+    if (c) { try { await c.doc(id).delete(); } catch (e) { console.warn("Firestore delete failed:", e); } }
+  }
+};
+</script>
 
+<!-- Firebase (optional layer — the app never waits on it) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<script>
+(function () {
+  var cfg = window.FIREBASE_CONFIG || {};
+  var unset = Object.keys(cfg).some(function (k) {
+    return String(cfg[k]).indexOf("PASTE_") === 0;
+  });
+  if (unset) {
+    console.info("Lyric Writer: Firebase config not filled in — running locally with localStorage.");
+    return;
+  }
+  if (typeof firebase === "undefined") {
+    console.info("Lyric Writer: Firebase SDK unavailable — running locally with localStorage.");
+    return;
+  }
+  try {
+    firebase.initializeApp(cfg);
+    window.fbAuth = firebase.auth();
+    window.fbDb = firebase.firestore();
+    window.fbGoogleProvider = new firebase.auth.GoogleAuthProvider();
+  } catch (e) {
+    console.warn("Lyric Writer: Firebase init failed, continuing locally.", e);
+  }
+})();
+</script>
+
+<!-- React (pinned, jsDelivr) -->
+<script crossorigin src="https://cdn.jsdelivr.net/npm/react@18.2.0/umd/react.production.min.js"></script>
+<script crossorigin src="https://cdn.jsdelivr.net/npm/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
+
+<!-- App (JSX pre-compiled to React.createElement — no runtime transpiling).
+     Nothing touches React until it is confirmed loaded. -->
+<script>
+(function () {
+  function startLyricWriter() {
+const {
+  useState,
+  useEffect,
+  useRef
+} = React;
 const THEMES = {
   parchment: {
-    name: "Parchment", bg: "#ede0c0", surface: "#f5ecd6", toolbar: "#e8d8b0",
-    border: "#c4a86a", text: "#2a160a", muted: "#8c6a3a", accent: "#8b4513",
-    accentText: "#ffffff", titlePlaceholder: "#b89a60",
-    paperLines: "rgba(139,90,43,0.12)", paperEffect: "texture",
-    defaultFont: "'IM Fell English', serif",
+    name: "Parchment",
+    bg: "#ede0c0",
+    surface: "#f5ecd6",
+    toolbar: "#e8d8b0",
+    border: "#c4a86a",
+    text: "#2a160a",
+    muted: "#8c6a3a",
+    accent: "#8b4513",
+    accentText: "#ffffff",
+    titlePlaceholder: "#b89a60",
+    defaultFont: "'IM Fell English', serif"
   },
   midnight: {
-    name: "Midnight", bg: "#0b0c14", surface: "#10111c", toolbar: "#0d0e18",
-    border: "#252640", text: "#d8d4f0", muted: "#4a4a70", accent: "#7c5cfc",
-    accentText: "#ffffff", titlePlaceholder: "#3a3a5a",
-    paperLines: null, paperEffect: "grain",
-    defaultFont: "'Special Elite', cursive",
+    name: "Midnight",
+    bg: "#0b0c14",
+    surface: "#10111c",
+    toolbar: "#0d0e18",
+    border: "#252640",
+    text: "#d8d4f0",
+    muted: "#4a4a70",
+    accent: "#7c5cfc",
+    accentText: "#ffffff",
+    titlePlaceholder: "#3a3a5a",
+    defaultFont: "'Special Elite', cursive"
   },
   neon: {
-    name: "Neon", bg: "#03050a", surface: "#060c14", toolbar: "#020408",
-    border: "#00331a", text: "#00f5a0", muted: "#005533", accent: "#ff2d78",
-    accentText: "#ffffff", titlePlaceholder: "#004422",
-    paperLines: null, paperEffect: "scanlines",
-    defaultFont: "'Josefin Sans', sans-serif",
+    name: "Neon",
+    bg: "#03050a",
+    surface: "#060c14",
+    toolbar: "#020408",
+    border: "#00331a",
+    text: "#00f5a0",
+    muted: "#005533",
+    accent: "#ff2d78",
+    accentText: "#ffffff",
+    titlePlaceholder: "#004422",
+    defaultFont: "'Josefin Sans', sans-serif"
   },
   daylight: {
-    name: "Daylight", bg: "#f7f4f0", surface: "#ffffff", toolbar: "#f0ece6",
-    border: "#ddd5c8", text: "#18130e", muted: "#a09080", accent: "#c0392b",
-    accentText: "#ffffff", titlePlaceholder: "#ccc0b0",
-    paperLines: null, paperEffect: "clean",
-    defaultFont: "'Playfair Display', serif",
+    name: "Daylight",
+    bg: "#f7f4f0",
+    surface: "#ffffff",
+    toolbar: "#f0ece6",
+    border: "#ddd5c8",
+    text: "#18130e",
+    muted: "#a09080",
+    accent: "#c0392b",
+    accentText: "#ffffff",
+    titlePlaceholder: "#ccc0b0",
+    defaultFont: "'Playfair Display', serif"
   },
   dusk: {
-    name: "Dusk", bg: "#110b1e", surface: "#1a1030", toolbar: "#0e0918",
-    border: "#2e1f50", text: "#ffcb80", muted: "#5a3a6a", accent: "#ff6b35",
-    accentText: "#ffffff", titlePlaceholder: "#3a2450",
-    paperLines: null, paperEffect: "glow",
-    defaultFont: "'Abril Fatface', cursive",
-  },
+    name: "Dusk",
+    bg: "#110b1e",
+    surface: "#1a1030",
+    toolbar: "#0e0918",
+    border: "#2e1f50",
+    text: "#ffcb80",
+    muted: "#5a3a6a",
+    accent: "#ff6b35",
+    accentText: "#ffffff",
+    titlePlaceholder: "#3a2450",
+    defaultFont: "'Abril Fatface', cursive"
+  }
 };
-
-const FONTS = [
-  { label: "Special Elite", value: "'Special Elite', cursive" },
-  { label: "Playfair Display", value: "'Playfair Display', serif" },
-  { label: "IM Fell English", value: "'IM Fell English', serif" },
-  { label: "Josefin Sans", value: "'Josefin Sans', sans-serif" },
-  { label: "Abril Fatface", value: "'Abril Fatface', cursive" },
-  { label: "Courier Prime", value: "'Courier Prime', monospace" },
-  { label: "Lora", value: "'Lora', serif" },
-  { label: "Raleway", value: "'Raleway', sans-serif" },
-];
-
+const FONTS = [{
+  label: "Special Elite",
+  value: "'Special Elite', cursive"
+}, {
+  label: "Playfair Display",
+  value: "'Playfair Display', serif"
+}, {
+  label: "IM Fell English",
+  value: "'IM Fell English', serif"
+}, {
+  label: "Josefin Sans",
+  value: "'Josefin Sans', sans-serif"
+}, {
+  label: "Abril Fatface",
+  value: "'Abril Fatface', cursive"
+}, {
+  label: "Courier Prime",
+  value: "'Courier Prime', monospace"
+}, {
+  label: "Lora",
+  value: "'Lora', serif"
+}, {
+  label: "Raleway",
+  value: "'Raleway', sans-serif"
+}];
+const ALIGN_OPTIONS = [{
+  key: "left",
+  label: "Align left",
+  icon: /*#__PURE__*/React.createElement("svg", {
+    viewBox: "0 0 16 16",
+    width: "14",
+    height: "14",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: "1.5",
+    strokeLinecap: "round"
+  }, /*#__PURE__*/React.createElement("path", {
+    d: "M2 4h12M2 7.5h7M2 11h10M2 14.5h5"
+  }))
+}, {
+  key: "center",
+  label: "Center",
+  icon: /*#__PURE__*/React.createElement("svg", {
+    viewBox: "0 0 16 16",
+    width: "14",
+    height: "14",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: "1.5",
+    strokeLinecap: "round"
+  }, /*#__PURE__*/React.createElement("path", {
+    d: "M2 4h12M4.5 7.5h7M3 11h10M5.5 14.5h5"
+  }))
+}, {
+  key: "right",
+  label: "Align right",
+  icon: /*#__PURE__*/React.createElement("svg", {
+    viewBox: "0 0 16 16",
+    width: "14",
+    height: "14",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: "1.5",
+    strokeLinecap: "round"
+  }, /*#__PURE__*/React.createElement("path", {
+    d: "M2 4h12M7 7.5h7M4 11h10M9 14.5h5"
+  }))
+}];
 const FONT_SIZES = [12, 14, 16, 18, 20, 24, 28, 32];
-
-const THEME_ICONS = {
-  parchment: (
-    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M5 4h12a2 2 0 0 1 2 2v14H7a2 2 0 0 1-2-2V4z"/>
-      <path d="M5 4v14a2 2 0 0 0 2 2"/>
-      <path d="M9 8h7M9 12h7M9 16h5"/>
-    </svg>
-  ),
-  midnight: (
-    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>
-    </svg>
-  ),
-  neon: (
-    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/>
-    </svg>
-  ),
-  daylight: (
-    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="4"/>
-      <path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4"/>
-    </svg>
-  ),
-  dusk: (
-    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M3 18h18"/>
-      <path d="M5 14h14"/>
-      <path d="M12 4v6"/>
-      <path d="m9 7 3-3 3 3"/>
-    </svg>
-  ),
+const WIDTHS = {
+  narrow: {
+    label: "Narrow",
+    value: "680px"
+  },
+  medium: {
+    label: "Medium",
+    value: "900px"
+  },
+  wide: {
+    label: "Wide",
+    value: "1200px"
+  },
+  full: {
+    label: "Full",
+    value: "95%"
+  }
 };
-
-const STORAGE_KEY = "lyricwriter:songs";
-
-function loadAllSongs() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch { return {}; }
+const THEME_ICONS = {
+  parchment: /*#__PURE__*/React.createElement("svg", {
+    viewBox: "0 0 24 24",
+    width: "16",
+    height: "16",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: "1.6",
+    strokeLinecap: "round",
+    strokeLinejoin: "round"
+  }, /*#__PURE__*/React.createElement("path", {
+    d: "M5 4h12a2 2 0 0 1 2 2v14H7a2 2 0 0 1-2-2V4z"
+  }), /*#__PURE__*/React.createElement("path", {
+    d: "M5 4v14a2 2 0 0 0 2 2"
+  }), /*#__PURE__*/React.createElement("path", {
+    d: "M9 8h7M9 12h7M9 16h5"
+  })),
+  midnight: /*#__PURE__*/React.createElement("svg", {
+    viewBox: "0 0 24 24",
+    width: "16",
+    height: "16",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: "1.6",
+    strokeLinecap: "round",
+    strokeLinejoin: "round"
+  }, /*#__PURE__*/React.createElement("path", {
+    d: "M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"
+  })),
+  neon: /*#__PURE__*/React.createElement("svg", {
+    viewBox: "0 0 24 24",
+    width: "16",
+    height: "16",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: "1.6",
+    strokeLinecap: "round",
+    strokeLinejoin: "round"
+  }, /*#__PURE__*/React.createElement("path", {
+    d: "M13 2 4 14h7l-1 8 9-12h-7l1-8z"
+  })),
+  daylight: /*#__PURE__*/React.createElement("svg", {
+    viewBox: "0 0 24 24",
+    width: "16",
+    height: "16",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: "1.6",
+    strokeLinecap: "round",
+    strokeLinejoin: "round"
+  }, /*#__PURE__*/React.createElement("circle", {
+    cx: "12",
+    cy: "12",
+    r: "4"
+  }), /*#__PURE__*/React.createElement("path", {
+    d: "M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4"
+  })),
+  dusk: /*#__PURE__*/React.createElement("svg", {
+    viewBox: "0 0 24 24",
+    width: "16",
+    height: "16",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: "1.6",
+    strokeLinecap: "round",
+    strokeLinejoin: "round"
+  }, /*#__PURE__*/React.createElement("path", {
+    d: "M3 18h18"
+  }), /*#__PURE__*/React.createElement("path", {
+    d: "M5 14h14"
+  }), /*#__PURE__*/React.createElement("path", {
+    d: "M12 4v6"
+  }), /*#__PURE__*/React.createElement("path", {
+    d: "m9 7 3-3 3 3"
+  }))
+};
+const TOPIC_BUCKETS = [{
+  key: "theme",
+  label: "Theme / Angle"
+}, {
+  key: "images",
+  label: "Images & Details"
+}, {
+  key: "words",
+  label: "Word Bank"
+}, {
+  key: "notes",
+  label: "Notes"
+}];
+let nodeSeq = 0;
+function makeNode(text) {
+  nodeSeq += 1;
+  return {
+    id: `n${Date.now()}_${nodeSeq}`,
+    text,
+    children: []
+  };
 }
 
-function saveAllSongs(songs) {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(songs)); } catch {}
+// Old saves stored plain strings; convert them to nodes.
+function normalizeNodes(arr) {
+  return (arr || []).map(it => typeof it === "string" ? makeNode(it) : {
+    id: it.id || makeNode("").id,
+    text: it.text,
+    children: normalizeNodes(it.children)
+  });
+}
+let topicSeq = 0;
+function makeTopic(name) {
+  topicSeq += 1;
+  return {
+    id: `t${Date.now()}_${topicSeq}`,
+    name,
+    root: [],
+    date: Date.now()
+  };
 }
 
+// Accepts: new topics array, older single-tree {root}, or oldest four-bucket shape.
+function normalizeTopics(data) {
+  if (Array.isArray(data)) {
+    return data.map(t => ({
+      id: t.id || makeTopic("").id,
+      name: t.name || "Untitled topic",
+      root: normalizeNodes(t.root),
+      date: t.date || Date.now()
+    }));
+  }
+  if (!data) return [];
+  if (Array.isArray(data.root)) {
+    if (!data.root.length) return [];
+    const t = makeTopic("Untitled topic");
+    t.root = normalizeNodes(data.root);
+    return [t];
+  }
+  const out = [];
+  for (const b of TOPIC_BUCKETS) {
+    if (data[b.key]?.length) {
+      const t = makeTopic(b.label);
+      t.root = normalizeNodes(data[b.key]);
+      out.push(t);
+    }
+  }
+  return out;
+}
+
+// Walk to the child-array at `ids` and transform it.
+function updateAtPath(nodes, ids, fn) {
+  if (ids.length === 0) return fn(nodes);
+  const [head, ...rest] = ids;
+  return nodes.map(n => n.id !== head ? n : {
+    ...n,
+    children: updateAtPath(n.children, rest, fn)
+  });
+}
+function nodesAlongPath(nodes, ids) {
+  const chain = [];
+  let list = nodes;
+  for (const id of ids) {
+    const found = list.find(n => n.id === id);
+    if (!found) break;
+    chain.push(found);
+    list = found.children;
+  }
+  return chain;
+}
+function countDescendants(node) {
+  return (node.children || []).reduce((sum, c) => sum + 1 + countDescendants(c), 0);
+}
+const RHYME_MODES = [{
+  key: "rhy",
+  label: "Perfect",
+  param: "rel_rhy"
+}, {
+  key: "nry",
+  label: "Near",
+  param: "rel_nry"
+}, {
+  key: "syn",
+  label: "Similar",
+  param: "ml"
+}, {
+  key: "cns",
+  label: "Consonant",
+  param: "rel_cns"
+}];
 function formatDate(ts) {
-  return new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  return new Date(ts).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric"
+  });
 }
 
-function LyricWriter() {
+// ============================================================
+// TOPIC MAP — association canvas
+// ============================================================
+function countLeaves(n) {
+  const kids = n.children || [];
+  if (!kids.length) return 1;
+  return kids.reduce((s, c) => s + countLeaves(c), 0);
+}
+function buildLayout(rootChildren, rootLabel) {
+  const out = [];
+  const rootEntry = {
+    node: {
+      id: "__root",
+      text: rootLabel,
+      children: rootChildren
+    },
+    depth: 0,
+    x: 0,
+    y: 0,
+    parentPos: null,
+    ids: [],
+    isRoot: true
+  };
+  out.push(rootEntry);
+  const total = rootChildren.reduce((s, c) => s + countLeaves(c), 0) || 1;
+  const startAngle = -Math.PI / 2;
+  let cursor = startAngle;
+  const walk = (node, depth, a0, a1, parentPos, ids) => {
+    const angle = (a0 + a1) / 2;
+    const r = depth === 1 ? 195 : 195 + (depth - 1) * 155;
+    const pos = {
+      x: Math.cos(angle) * r,
+      y: Math.sin(angle) * r
+    };
+    out.push({
+      node,
+      depth,
+      ...pos,
+      parentPos,
+      ids,
+      angle
+    });
+    const kids = node.children || [];
+    if (!kids.length) return;
+    const kidTotal = kids.reduce((s, c) => s + countLeaves(c), 0) || 1;
+    let span = Math.min(a1 - a0, Math.PI * 0.8);
+    let c2 = angle - span / 2;
+    for (const c of kids) {
+      const share = countLeaves(c) / kidTotal * span;
+      walk(c, depth + 1, c2, c2 + share, pos, [...ids, node.id]);
+      c2 += share;
+    }
+  };
+  for (const c of rootChildren) {
+    const share = countLeaves(c) / total * Math.PI * 2;
+    walk(c, 1, cursor, cursor + share, {
+      x: 0,
+      y: 0
+    }, []);
+    cursor += share;
+  }
+  return out;
+}
+
+// ============================================================
+// TOPICS PAGE — list of topics, each owning a map
+// ============================================================
+function countAllNodes(nodes) {
+  return (nodes || []).reduce((s, n) => s + 1 + countAllNodes(n.children), 0);
+}
+function TopicsPage({
+  theme: t,
+  font,
+  songTitle,
+  topics,
+  setTopics,
+  onOpen,
+  onClose
+}) {
+  const [newName, setNewName] = useState("");
+  const [editingId, setEditingId] = useState(null);
+  const [editVal, setEditVal] = useState("");
+  function addTopic() {
+    const val = newName.trim();
+    if (!val) return;
+    const tp = makeTopic(val);
+    setTopics(prev => [...prev, tp]);
+    setNewName("");
+  }
+  function renameTopic(id) {
+    const val = editVal.trim();
+    if (!val) {
+      setEditingId(null);
+      return;
+    }
+    setTopics(prev => prev.map(x => x.id === id ? {
+      ...x,
+      name: val
+    } : x));
+    setEditingId(null);
+  }
+  function deleteTopic(id) {
+    setTopics(prev => prev.filter(x => x.id !== id));
+  }
+  return /*#__PURE__*/React.createElement("div", {
+    className: "tp-overlay"
+  }, /*#__PURE__*/React.createElement("style", null, `
+        .tp-overlay{position:fixed;inset:0;z-index:200;background:${t.bg};display:flex;flex-direction:column;font-family:system-ui,sans-serif;overflow-y:auto;}
+        .tp-bar{background:${t.toolbar};border-bottom:1px solid ${t.border};padding:9px 14px;display:flex;align-items:center;gap:8px;flex-shrink:0;height:52px;position:sticky;top:0;z-index:5;}
+        .tp-bar-title{font-size:12px;letter-spacing:.13em;text-transform:uppercase;color:${t.muted};font-weight:700;}
+        .tp-close{background:${t.accent};border:none;color:${t.accentText};padding:0 15px;height:30px;font-size:12px;font-weight:700;border-radius:5px;cursor:pointer;margin-left:auto;white-space:nowrap;}
+        .tp-inner{max-width:620px;width:100%;margin:0 auto;padding:34px 20px 70px;}
+        .tp-sub{font-size:14px;color:${t.muted};margin-bottom:26px;line-height:1.65;}
+        .tp-addrow{display:flex;gap:8px;margin-bottom:30px;}
+        .tp-input{flex:1;background:${t.surface};border:1px solid ${t.border};color:${t.text};padding:12px 14px;font-size:15px;border-radius:6px;outline:none;font-family:${font};min-width:0;}
+        .tp-input:focus{border-color:${t.accent};}
+        .tp-input::placeholder{color:${t.titlePlaceholder};font-family:system-ui,sans-serif;font-size:14px;}
+        .tp-add{background:${t.accent};border:none;color:${t.accentText};padding:0 20px;font-size:14px;font-weight:700;border-radius:6px;cursor:pointer;white-space:nowrap;}
+        .tp-label{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:${t.muted};font-weight:700;margin-bottom:12px;}
+        .tp-card{background:${t.surface};border:1px solid ${t.border};border-radius:8px;padding:16px;margin-bottom:10px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;cursor:pointer;transition:border-color .15s,box-shadow .15s,transform .12s;}
+        .tp-card:hover{border-color:${t.accent};box-shadow:0 3px 14px rgba(0,0,0,.09);transform:translateY(-1px);}
+        .tp-card-main{flex:1;min-width:0;}
+        .tp-card-name{font-family:${font};font-size:19px;color:${t.text};line-height:1.3;word-break:break-word;}
+        .tp-card-meta{font-size:11px;color:${t.muted};margin-top:4px;}
+        .tp-card-acts{display:flex;align-items:center;gap:10px;flex-shrink:0;}
+        .tp-mini{display:flex;gap:2px;}
+        .tp-open{background:${t.accent};border:none;color:${t.accentText};padding:8px 14px;font-size:12px;font-weight:700;border-radius:5px;cursor:pointer;white-space:nowrap;}
+        .tp-open:hover{opacity:.88;}
+        .tp-icon{background:transparent;border:1px solid transparent;color:${t.muted};cursor:pointer;font-size:12px;padding:5px 8px;border-radius:4px;}
+        .tp-icon:hover{border-color:${t.border};color:${t.text};}
+        .tp-icon.danger:hover{background:#e53935;border-color:#e53935;color:#fff;}
+        .tp-editrow{display:flex;gap:6px;flex:1;}
+        .tp-editinput{flex:1;background:${t.bg};border:1px solid ${t.accent};color:${t.text};padding:8px 10px;font-size:15px;border-radius:5px;outline:none;font-family:${font};min-width:0;}
+        .tp-empty{border:1px dashed ${t.border};border-radius:8px;padding:36px 22px;text-align:center;color:${t.muted};font-size:13px;line-height:1.75;}
+      `), /*#__PURE__*/React.createElement("div", {
+    className: "tp-bar"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "tp-bar-title"
+  }, "Topics"), /*#__PURE__*/React.createElement("button", {
+    className: "tp-close",
+    onClick: onClose
+  }, "Back to lyrics")), /*#__PURE__*/React.createElement("div", {
+    className: "tp-inner"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "tp-sub"
+  }, "Name the things you want to write around. Open any topic to build its association map."), /*#__PURE__*/React.createElement("div", {
+    className: "tp-addrow"
+  }, /*#__PURE__*/React.createElement("input", {
+    className: "tp-input",
+    value: newName,
+    onChange: e => setNewName(e.target.value),
+    onKeyDown: e => {
+      if (e.key === "Enter") addTopic();
+    },
+    placeholder: "Name a topic to explore..."
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "tp-add",
+    onClick: addTopic
+  }, "Create")), topics.length === 0 ? /*#__PURE__*/React.createElement("div", {
+    className: "tp-empty"
+  }, "No topics yet.", /*#__PURE__*/React.createElement("br", null), "Name something you want to write around — a feeling, a place, an object —", /*#__PURE__*/React.createElement("br", null), "and build the map of associations out from it.") : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "tp-label"
+  }, topics.length, " topic", topics.length === 1 ? "" : "s"), topics.map(tp => {
+    const count = countAllNodes(tp.root);
+    const editing = editingId === tp.id;
+    return /*#__PURE__*/React.createElement("div", {
+      key: tp.id,
+      className: "tp-card",
+      onClick: () => !editing && onOpen(tp.id)
+    }, editing ? /*#__PURE__*/React.createElement("div", {
+      className: "tp-editrow",
+      onClick: e => e.stopPropagation()
+    }, /*#__PURE__*/React.createElement("input", {
+      className: "tp-editinput",
+      value: editVal,
+      autoFocus: true,
+      onChange: e => setEditVal(e.target.value),
+      onKeyDown: e => {
+        if (e.key === "Enter") renameTopic(tp.id);
+        if (e.key === "Escape") setEditingId(null);
+      }
+    }), /*#__PURE__*/React.createElement("button", {
+      className: "tp-icon",
+      onClick: () => renameTopic(tp.id)
+    }, "Save")) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+      className: "tp-card-main"
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "tp-card-name"
+    }, tp.name), /*#__PURE__*/React.createElement("div", {
+      className: "tp-card-meta"
+    }, count === 0 ? "empty — tap to start" : `${count} word${count === 1 ? "" : "s"} mapped`)), /*#__PURE__*/React.createElement("div", {
+      className: "tp-card-acts"
+    }, /*#__PURE__*/React.createElement("button", {
+      className: "tp-open",
+      onClick: e => {
+        e.stopPropagation();
+        onOpen(tp.id);
+      }
+    }, "Open map ›"), /*#__PURE__*/React.createElement("div", {
+      className: "tp-mini",
+      onClick: e => e.stopPropagation()
+    }, /*#__PURE__*/React.createElement("button", {
+      className: "tp-icon",
+      onClick: () => {
+        setEditVal(tp.name);
+        setEditingId(tp.id);
+      }
+    }, "Rename"), /*#__PURE__*/React.createElement("button", {
+      className: "tp-icon danger",
+      onClick: () => deleteTopic(tp.id)
+    }, "Delete")))));
+  }))));
+}
+function TopicMap({
+  theme: t,
+  font,
+  topicName,
+  root,
+  setRoot,
+  onBack,
+  onClose,
+  onInsert,
+  phrases,
+  onSavePhrase,
+  backLabel = "Topics"
+}) {
+  const [offset, setOffset] = useState({
+    x: 0,
+    y: 0
+  });
+  const [zoom, setZoom] = useState(1);
+  const [activeId, setActiveId] = useState(null);
+  const [inputVal, setInputVal] = useState("");
+  const [renaming, setRenaming] = useState(false);
+  const [renameVal, setRenameVal] = useState("");
+  const [showPhrases, setShowPhrases] = useState(false);
+  const [savedFlash, setSavedFlash] = useState(false);
+  const dragRef = useRef(null);
+  const movedRef = useRef(false);
+  const rootChildren = root || [];
+  const layout = buildLayout(rootChildren, topicName || "Topic");
+  const active = layout.find(l => l.node.id === activeId) || null;
+  function childPath(entry) {
+    return entry.isRoot ? [] : [...entry.ids, entry.node.id];
+  }
+  function addTo(entry, text) {
+    const val = (text || "").trim();
+    if (!val) return;
+    setRoot(prev => updateAtPath(prev || [], childPath(entry), arr => [...arr, makeNode(val)]));
+    setInputVal("");
+  }
+  function renameNode(entry, text) {
+    const val = (text || "").trim();
+    if (!val || entry.isRoot) return;
+    setRoot(prev => updateAtPath(prev || [], entry.ids, arr => arr.map(n => n.id === entry.node.id ? {
+      ...n,
+      text: val
+    } : n)));
+    setRenaming(false);
+  }
+  function removeEntry(entry) {
+    if (entry.isRoot) return;
+    setRoot(prev => updateAtPath(prev || [], entry.ids, arr => arr.filter(n => n.id !== entry.node.id)));
+    setActiveId(null);
+  }
+  function select(entry) {
+    if (activeId === entry.node.id) {
+      setActiveId(null);
+      return;
+    }
+    setActiveId(entry.node.id);
+    setInputVal("");
+    setRenaming(false);
+    setShowPhrases(false);
+    setSavedFlash(false);
+  }
+
+  // --- pan (mouse + touch) ---
+  function startDrag(cx, cy, target) {
+    if (target.closest?.(".tm-node") || target.closest?.(".tm-box")) return;
+    dragRef.current = {
+      sx: cx,
+      sy: cy,
+      ox: offset.x,
+      oy: offset.y
+    };
+    movedRef.current = false;
+  }
+  function moveDrag(cx, cy) {
+    const d = dragRef.current;
+    if (!d) return;
+    if (Math.abs(cx - d.sx) > 3 || Math.abs(cy - d.sy) > 3) movedRef.current = true;
+    setOffset({
+      x: d.ox + (cx - d.sx),
+      y: d.oy + (cy - d.sy)
+    });
+  }
+  function endDrag() {
+    if (dragRef.current && !movedRef.current) setActiveId(null);
+    dragRef.current = null;
+  }
+  function onWheel(e) {
+    setZoom(z => Math.min(2.2, Math.max(0.3, z - e.deltaY * 0.0012)));
+  }
+  const hasNodes = rootChildren.length > 0;
+  return /*#__PURE__*/React.createElement("div", {
+    className: "tm-overlay"
+  }, /*#__PURE__*/React.createElement("style", null, `
+        .tm-overlay{position:fixed;inset:0;z-index:200;background:${t.bg};display:flex;flex-direction:column;font-family:system-ui,sans-serif;}
+        .tm-bar{background:${t.toolbar};border-bottom:1px solid ${t.border};padding:9px 14px;display:flex;align-items:center;gap:7px;flex-shrink:0;height:52px;}
+        .tm-heading{font-family:${font};font-size:17px;color:${t.text};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:34%;}
+        .tm-spacer{flex:1;}
+        .tm-zoom{display:flex;gap:4px;}
+        .tm-bar-btn{background:transparent;border:1px solid ${t.border};color:${t.text};width:30px;height:30px;font-size:14px;border-radius:5px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;}
+        .tm-bar-btn.wide{width:auto;padding:0 11px;font-size:12px;}
+        .tm-bar-btn:hover{background:${t.border};}
+        .tm-close{background:${t.accent};border:none;color:${t.accentText};padding:0 15px;height:30px;font-size:12px;font-weight:700;border-radius:5px;cursor:pointer;white-space:nowrap;}
+        .tm-canvas{flex:1;overflow:hidden;position:relative;cursor:grab;touch-action:none;background:radial-gradient(circle at 50% 46%, ${t.surface}55, transparent 62%);}
+        .tm-canvas:active{cursor:grabbing;}
+        .tm-stage{position:absolute;left:50%;top:46%;transform-origin:0 0;}
+        .tm-links{position:absolute;left:0;top:0;overflow:visible;pointer-events:none;}
+        .tm-nodewrap{position:absolute;width:0;height:0;}
+        .tm-node{position:absolute;left:0;top:0;transform:translate(-50%,-50%);cursor:pointer;user-select:none;width:max-content;max-width:200px;text-align:center;line-height:1.35;transition:box-shadow .18s,transform .18s,border-color .18s;overflow-wrap:break-word;}
+        .tm-root{background:${t.accent};color:${t.accentText};font-family:${font};font-size:21px;padding:15px 30px;border-radius:30px;border:none;box-shadow:0 5px 22px ${t.accent}44;letter-spacing:.01em;}
+        .tm-root:hover{transform:translate(-50%,-50%) scale(1.04);}
+        .tm-branch{background:${t.surface};color:${t.text};border:1.5px solid ${t.accent}bb;font-family:${font};font-size:16px;padding:9px 18px;border-radius:18px;box-shadow:0 2px 10px rgba(0,0,0,.07);}
+        .tm-leaf{background:${t.surface};color:${t.text};border:1px solid ${t.border};font-family:${font};font-size:15px;padding:8px 16px;border-radius:2px 16px 2px 16px;box-shadow:0 2px 8px rgba(0,0,0,.06);}
+        .tm-node:hover{border-color:${t.accent};}
+        .tm-node.sel{border-color:${t.accent};box-shadow:0 0 0 3px ${t.accent}33,0 4px 16px rgba(0,0,0,.12);transform:translate(-50%,-50%) scale(1.05);}
+        .tm-root.sel{transform:translate(-50%,-50%) scale(1.05);}
+        .tm-hint{position:absolute;left:0;top:38px;transform:translate(-50%,0);font-size:12px;color:${t.muted};white-space:nowrap;pointer-events:none;font-style:italic;}
+        .tm-box{position:absolute;left:0;top:34px;transform:translate(-50%,0);background:${t.toolbar};border:1px solid ${t.accent};border-radius:8px;padding:12px;width:280px;box-shadow:0 8px 28px rgba(0,0,0,.28);z-index:10;}
+        .tm-box-label{font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:${t.muted};margin-bottom:8px;font-weight:600;}
+        .tm-box-row{display:flex;gap:6px;}
+        .tm-box-input{flex:1;background:${t.surface};border:1px solid ${t.border};color:${t.text};padding:8px 10px;font-size:13px;border-radius:5px;outline:none;min-width:0;font-family:system-ui,sans-serif;}
+        .tm-box-input:focus{border-color:${t.accent};}
+        .tm-box-add{background:${t.accent};border:none;color:${t.accentText};padding:8px 13px;font-size:14px;border-radius:5px;cursor:pointer;font-weight:600;}
+        .tm-box-acts{display:flex;flex-wrap:wrap;gap:5px;margin-top:10px;padding-top:10px;border-top:1px solid ${t.border};}
+        .tm-box-btn{flex:1 1 46%;}
+        .tm-link{background:transparent;border:none;color:${t.accent};font-size:11.5px;cursor:pointer;padding:8px 0 2px;text-align:left;width:100%;font-family:system-ui,sans-serif;text-decoration:underline;text-underline-offset:2px;}
+        .tm-link:hover{opacity:.75;}
+        .tm-phrases{max-height:150px;overflow-y:auto;border:1px solid ${t.border};border-radius:5px;margin-top:6px;background:${t.surface};}
+        .tm-phrase{padding:8px 10px;font-size:12.5px;line-height:1.45;color:${t.text};cursor:pointer;border-bottom:1px solid ${t.border};}
+        .tm-phrase:last-child{border-bottom:none;}
+        .tm-phrase:hover{background:${t.accent};color:${t.accentText};}
+        .tm-phrase-empty{padding:12px 10px;font-size:12px;color:${t.muted};text-align:center;}
+        .tm-box-btn{background:transparent;border:1px solid ${t.border};color:${t.text};padding:5px 6px;font-size:11px;border-radius:4px;cursor:pointer;white-space:nowrap;}
+        .tm-box-btn:hover{background:${t.border};}
+        .tm-box-btn.danger:hover{background:#e53935;border-color:#e53935;color:#fff;}
+        @media (max-width: 620px){
+          .tm-heading{max-width:44%;font-size:16px;}
+        }
+      `), /*#__PURE__*/React.createElement("div", {
+    className: "tm-bar"
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "tm-bar-btn wide",
+    onClick: onBack
+  }, "‹ ", backLabel), /*#__PURE__*/React.createElement("span", {
+    className: "tm-heading"
+  }, topicName), /*#__PURE__*/React.createElement("div", {
+    className: "tm-spacer"
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "tm-zoom"
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "tm-bar-btn",
+    onClick: () => setZoom(z => Math.max(0.3, z - 0.15))
+  }, "−"), /*#__PURE__*/React.createElement("button", {
+    className: "tm-bar-btn",
+    onClick: () => setZoom(z => Math.min(2.2, z + 0.15))
+  }, "+"), /*#__PURE__*/React.createElement("button", {
+    className: "tm-bar-btn",
+    title: "Center",
+    onClick: () => {
+      setOffset({
+        x: 0,
+        y: 0
+      });
+      setZoom(1);
+    }
+  }, "⌖")), /*#__PURE__*/React.createElement("button", {
+    className: "tm-close",
+    onClick: onClose
+  }, "Lyrics")), /*#__PURE__*/React.createElement("div", {
+    className: "tm-canvas",
+    onMouseDown: e => startDrag(e.clientX, e.clientY, e.target),
+    onMouseMove: e => moveDrag(e.clientX, e.clientY),
+    onMouseUp: endDrag,
+    onMouseLeave: () => {
+      dragRef.current = null;
+    },
+    onTouchStart: e => startDrag(e.touches[0].clientX, e.touches[0].clientY, e.target),
+    onTouchMove: e => moveDrag(e.touches[0].clientX, e.touches[0].clientY),
+    onTouchEnd: endDrag,
+    onWheel: onWheel
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "tm-stage",
+    style: {
+      transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})`
+    }
+  }, /*#__PURE__*/React.createElement("svg", {
+    className: "tm-links",
+    width: "1",
+    height: "1"
+  }, layout.filter(e => e.parentPos).map((e, i) => {
+    const {
+      x: px,
+      y: py
+    } = e.parentPos;
+    const mx = (px + e.x) / 2;
+    const my = (py + e.y) / 2;
+    const bow = e.depth === 1 ? 0.1 : 0.16;
+    const d = `M ${px} ${py} Q ${mx + (e.y - py) * bow} ${my - (e.x - px) * bow} ${e.x} ${e.y}`;
+    return /*#__PURE__*/React.createElement("path", {
+      key: i,
+      d: d,
+      fill: "none",
+      stroke: t.accent,
+      strokeOpacity: Math.max(0.16, 0.55 - e.depth * 0.11),
+      strokeWidth: Math.max(1, 2.4 - e.depth * 0.45),
+      strokeLinecap: "round"
+    });
+  })), layout.map(entry => {
+    const cls = entry.isRoot ? "tm-node tm-root" : (entry.node.children || []).length ? "tm-node tm-branch" : "tm-node tm-leaf";
+    const isActive = activeId === entry.node.id;
+    return /*#__PURE__*/React.createElement("div", {
+      className: "tm-nodewrap",
+      key: entry.node.id,
+      style: {
+        left: entry.x,
+        top: entry.y
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      className: `${cls}${isActive ? " sel" : ""}`,
+      onClick: ev => {
+        ev.stopPropagation();
+        select(entry);
+      }
+    }, entry.node.text), entry.isRoot && !hasNodes && !isActive && /*#__PURE__*/React.createElement("div", {
+      className: "tm-hint"
+    }, "tap to add your first word"), isActive && /*#__PURE__*/React.createElement("div", {
+      className: "tm-box",
+      onMouseDown: ev => ev.stopPropagation(),
+      onTouchStart: ev => ev.stopPropagation()
+    }, renaming ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+      className: "tm-box-label"
+    }, "Rename"), /*#__PURE__*/React.createElement("div", {
+      className: "tm-box-row"
+    }, /*#__PURE__*/React.createElement("input", {
+      className: "tm-box-input",
+      value: renameVal,
+      autoFocus: true,
+      onChange: ev => setRenameVal(ev.target.value),
+      onKeyDown: ev => {
+        if (ev.key === "Enter") renameNode(entry, renameVal);
+        if (ev.key === "Escape") setRenaming(false);
+      }
+    }), /*#__PURE__*/React.createElement("button", {
+      className: "tm-box-add",
+      onClick: () => renameNode(entry, renameVal)
+    }, "✓"))) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+      className: "tm-box-label"
+    }, entry.isRoot ? "Add to the map" : `Connects to "${entry.node.text}"`), /*#__PURE__*/React.createElement("div", {
+      className: "tm-box-row"
+    }, /*#__PURE__*/React.createElement("input", {
+      className: "tm-box-input",
+      value: inputVal,
+      autoFocus: true,
+      placeholder: "word, image, line...",
+      onChange: ev => setInputVal(ev.target.value),
+      onKeyDown: ev => {
+        if (ev.key === "Enter") addTo(entry, inputVal);
+      }
+    }), /*#__PURE__*/React.createElement("button", {
+      className: "tm-box-add",
+      onClick: () => addTo(entry, inputVal)
+    }, "+")), /*#__PURE__*/React.createElement("button", {
+      className: "tm-link",
+      onClick: () => setShowPhrases(v => !v)
+    }, showPhrases ? "Hide saved phrases" : `Attach a saved phrase (${(phrases || []).length})`), showPhrases && /*#__PURE__*/React.createElement("div", {
+      className: "tm-phrases"
+    }, (phrases || []).length === 0 ? /*#__PURE__*/React.createElement("div", {
+      className: "tm-phrase-empty"
+    }, "No phrases saved yet.") : phrases.map(ph => /*#__PURE__*/React.createElement("div", {
+      key: ph.key,
+      className: "tm-phrase",
+      onClick: () => {
+        addTo(entry, ph.text);
+        setShowPhrases(false);
+      }
+    }, ph.text))), !entry.isRoot && /*#__PURE__*/React.createElement("div", {
+      className: "tm-box-acts"
+    }, /*#__PURE__*/React.createElement("button", {
+      className: "tm-box-btn",
+      onClick: () => onInsert(entry.node.text)
+    }, "Insert"), /*#__PURE__*/React.createElement("button", {
+      className: "tm-box-btn",
+      onClick: () => {
+        onSavePhrase(entry.node.text);
+        setSavedFlash(true);
+        setTimeout(() => setSavedFlash(false), 1400);
+      }
+    }, savedFlash ? "Saved \u2713" : "Save phrase"), /*#__PURE__*/React.createElement("button", {
+      className: "tm-box-btn",
+      onClick: () => {
+        setRenameVal(entry.node.text);
+        setRenaming(true);
+      }
+    }, "Rename"), /*#__PURE__*/React.createElement("button", {
+      className: "tm-box-btn danger",
+      onClick: () => removeEntry(entry)
+    }, "Delete")))));
+  }))));
+}
+function App() {
+  const [user, setUser] = useState(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [uidKey, setUidKey] = useState("guest");
+  useEffect(() => {
+    if (!window.fbAuth) {
+      // Firebase not configured — run as guest on localStorage.
+      Store.setUid("guest");
+      setAuthReady(true);
+      return;
+    }
+    const unsub = window.fbAuth.onAuthStateChanged(u => {
+      const uid = u ? u.uid : "guest";
+      Store.setUid(uid);
+      setUser(u);
+      setUidKey(uid);
+      setAuthReady(true);
+    });
+    return () => unsub();
+  }, []);
+  async function signIn() {
+    if (!window.fbAuth) return;
+    try {
+      await window.fbAuth.signInWithPopup(window.fbGoogleProvider);
+    } catch (err) {
+      console.warn("Sign-in failed:", err);
+      alert("Sign-in failed: " + (err.message || err));
+    }
+  }
+  async function signOut() {
+    if (!window.fbAuth) return;
+    try {
+      await window.fbAuth.signOut();
+    } catch (err) {
+      console.warn(err);
+    }
+  }
+  if (!authReady) {
+    return React.createElement("div", {
+      style: {
+        minHeight: "100vh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "#ede0c0",
+        color: "#8c6a3a",
+        fontFamily: "system-ui,sans-serif",
+        fontSize: 14
+      }
+    }, "Loading\u2026");
+  }
+  return /*#__PURE__*/React.createElement(LyricWriter, {
+    key: uidKey,
+    user: user,
+    onSignIn: signIn,
+    onSignOut: signOut
+  });
+}
+function LyricWriter({
+  user,
+  onSignIn,
+  onSignOut
+}) {
   const [themeKey, setThemeKey] = useState("parchment");
   const [font, setFont] = useState(THEMES.parchment.defaultFont);
   const [fontSize, setFontSize] = useState(18);
-  const [align, setAlign] = useState("left");
+  const [align, setAlign] = useState("center");
   const [bold, setBold] = useState(false);
   const [italic, setItalic] = useState(false);
   const [underline, setUnderline] = useState(false);
@@ -140,253 +1064,715 @@ function LyricWriter() {
   const [saveFlash, setSaveFlash] = useState(false);
   const [currentKey, setCurrentKey] = useState(null);
   const [pageWidth, setPageWidth] = useState("medium");
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [panelTab, setPanelTab] = useState(null);
+  const [rhymeWord, setRhymeWord] = useState("");
+  const [rhymeMode, setRhymeMode] = useState("rhy");
+  const [rhymeResults, setRhymeResults] = useState([]);
+  const [rhymeLoading, setRhymeLoading] = useState(false);
+  const [rhymeError, setRhymeError] = useState("");
+  const [phrases, setPhrases] = useState([]);
+  const [phraseInput, setPhraseInput] = useState("");
+  const [phraseError, setPhraseError] = useState("");
+  const [activePhraseKey, setActivePhraseKey] = useState(null);
+  const [topics, setTopics] = useState([]);
+  const [topicsOpen, setTopicsOpen] = useState(false);
+  const [activeTopicId, setActiveTopicId] = useState(null);
+  const textRef = useRef(null);
   const t = THEMES[themeKey];
-
-  const WIDTHS = {
-    narrow: { label: "Narrow", value: "680px" },
-    medium: { label: "Medium", value: "900px" },
-    wide: { label: "Wide", value: "1200px" },
-    full: { label: "Full", value: "95vw" },
-  };
   const paperWidth = WIDTHS[pageWidth].value;
-
-  useEffect(() => { refreshList(); }, []);
-
-  function refreshList() {
-    const all = loadAllSongs();
-    const arr = Object.entries(all).map(([key, d]) => ({
-      key, title: d.title || "Untitled", date: d.date || 0,
-    })).sort((a, b) => b.date - a.date);
-    setSavedSongs(arr);
+  const activeTopic = topics.find(tp => tp.id === activeTopicId) || null;
+  const activePhrase = phrases.find(p => p.key === activePhraseKey) || null;
+  useEffect(() => {
+    refreshList();
+    loadPhrases();
+  }, []);
+  async function refreshList() {
+    try {
+      const all = await Store.list("songs");
+      const out = Object.entries(all).map(([key, d]) => ({
+        key,
+        title: d.title || "Untitled",
+        date: d.date || 0
+      }));
+      setSavedSongs(out.sort((a, b) => b.date - a.date));
+    } catch {
+      setSavedSongs([]);
+    }
   }
-
-  function handleSave() {
-    const all = loadAllSongs();
+  async function handleSave() {
     const key = currentKey || `song_${Date.now()}`;
-    all[key] = {
-      title: title || "Untitled", content, themeKey, font, fontSize,
-      align, bold, italic, underline, date: Date.now(),
+    const data = {
+      title: title || "Untitled",
+      content,
+      themeKey,
+      font,
+      fontSize,
+      align,
+      bold,
+      italic,
+      underline,
+      pageWidth,
+      topics,
+      date: Date.now()
     };
-    saveAllSongs(all);
-    if (!currentKey) setCurrentKey(key);
-    setSaveFlash(true);
-    setTimeout(() => setSaveFlash(false), 1600);
-    refreshList();
+    try {
+      await Store.set("songs", key, data);
+      if (!currentKey) setCurrentKey(key);
+      setSaveFlash(true);
+      setTimeout(() => setSaveFlash(false), 1600);
+      refreshList();
+    } catch (err) {
+      console.warn("Save failed:", err);
+    }
   }
-
-  function handleLoad(key) {
-    const all = loadAllSongs();
-    const d = all[key];
-    if (!d) return;
-    setTitle(d.title || "");
-    setContent(d.content || "");
-    setThemeKey(d.themeKey || "parchment");
-    setFont(d.font || THEMES[d.themeKey || "parchment"].defaultFont);
-    setFontSize(d.fontSize || 18);
-    setAlign(d.align || "left");
-    setBold(d.bold || false);
-    setItalic(d.italic || false);
-    setUnderline(d.underline || false);
-    setCurrentKey(key);
-    setDrawerOpen(false);
+  async function handleLoad(key) {
+    try {
+      const all = await Store.list("songs");
+      const d = all[key];
+      if (!d) return;
+      setTitle(d.title || "");
+      setContent(d.content || "");
+      setThemeKey(d.themeKey || "parchment");
+      setFont(d.font || THEMES[d.themeKey || "parchment"].defaultFont);
+      setFontSize(d.fontSize || 18);
+      setAlign(d.align || "center");
+      setBold(!!d.bold);
+      setItalic(!!d.italic);
+      setUnderline(!!d.underline);
+      setPageWidth(d.pageWidth || "medium");
+      setTopics(normalizeTopics(d.topics ?? d.topic));
+      setActiveTopicId(null);
+      setCurrentKey(key);
+      setDrawerOpen(false);
+    } catch {}
   }
-
-  function handleDelete(e, key) {
+  async function handleDelete(e, key) {
     e.stopPropagation();
-    const all = loadAllSongs();
-    delete all[key];
-    saveAllSongs(all);
-    if (key === currentKey) setCurrentKey(null);
-    refreshList();
+    try {
+      await Store.remove("songs", key);
+      if (key === currentKey) setCurrentKey(null);
+      refreshList();
+    } catch {}
   }
-
   function handleNew() {
-    setTitle(""); setContent(""); setCurrentKey(null);
+    setTitle("");
+    setContent("");
+    setCurrentKey(null);
+    setTopics([]);
+    setActiveTopicId(null);
   }
-
-  function switchTheme(key) {
-    setThemeKey(key);
-    setFont(THEMES[key].defaultFont);
+  function switchTheme(k) {
+    setThemeKey(k);
+    setFont(THEMES[k].defaultFont);
   }
-
-  const textShadow = () => {
-    if (themeKey === "neon") return `0 0 8px ${t.text}99`;
-    if (themeKey === "dusk") return `0 0 12px ${t.text}44`;
-    return "none";
-  };
-
+  function insertAtCursor(text) {
+    const ta = textRef.current;
+    if (!ta) {
+      setContent(c => c + text);
+      return;
+    }
+    const start = ta.selectionStart ?? content.length;
+    const end = ta.selectionEnd ?? content.length;
+    const next = content.slice(0, start) + text + content.slice(end);
+    setContent(next);
+    requestAnimationFrame(() => {
+      ta.focus();
+      const pos = start + text.length;
+      ta.setSelectionRange(pos, pos);
+    });
+  }
+  function getSelectedText() {
+    const ta = textRef.current;
+    if (!ta) return "";
+    return content.slice(ta.selectionStart, ta.selectionEnd).trim();
+  }
+  async function lookupRhymes(word, modeKey) {
+    const w = (word || "").trim();
+    if (!w) return;
+    setRhymeLoading(true);
+    setRhymeError("");
+    setRhymeResults([]);
+    const mode = RHYME_MODES.find(m => m.key === modeKey) || RHYME_MODES[0];
+    try {
+      const url = `https://api.datamuse.com/words?${mode.param}=${encodeURIComponent(w)}&max=80`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("Lookup failed");
+      const data = await res.json();
+      setRhymeResults(data.map(d => d.word));
+      if (!data.length) setRhymeError("No results for that word.");
+    } catch (err) {
+      setRhymeError("Couldn't reach the rhyming dictionary from this preview. It will work on your live site.");
+    } finally {
+      setRhymeLoading(false);
+    }
+  }
+  function useSelectionForRhyme() {
+    const sel = getSelectedText();
+    const word = sel.split(/\s+/).pop() || "";
+    if (word) {
+      setRhymeWord(word);
+      lookupRhymes(word, rhymeMode);
+    }
+  }
+  async function loadPhrases() {
+    try {
+      const all = await Store.list("phrases");
+      const out = Object.entries(all).map(([key, d]) => ({
+        key,
+        text: d.text,
+        date: d.date || 0,
+        root: normalizeNodes(d.root)
+      }));
+      setPhrases(out.sort((a, b) => b.date - a.date));
+    } catch {
+      setPhrases([]);
+    }
+  }
+  async function addPhrase(text) {
+    const val = (text || "").trim();
+    if (!val) return;
+    const key = `phrase_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const item = {
+      key,
+      text: val,
+      date: Date.now(),
+      root: []
+    };
+    // Update immediately so the UI always responds
+    setPhrases(prev => [item, ...prev]);
+    setPhraseInput("");
+    setPhraseError("");
+    try {
+      await Store.set("phrases", key, {
+        text: val,
+        date: item.date,
+        root: []
+      });
+    } catch (err) {
+      setPhraseError("Saved locally only — sync unavailable.");
+    }
+  }
+  function setPhraseRoot(key, updater) {
+    setPhrases(prev => prev.map(p => {
+      if (p.key !== key) return p;
+      const nextRoot = typeof updater === "function" ? updater(p.root || []) : updater;
+      const updated = {
+        ...p,
+        root: nextRoot
+      };
+      try {
+        Store.set("phrases", key, {
+          text: updated.text,
+          date: updated.date,
+          root: nextRoot
+        });
+      } catch {}
+      return updated;
+    }));
+  }
+  async function deletePhrase(key) {
+    setPhrases(prev => prev.filter(p => p.key !== key));
+    try {
+      await Store.remove("phrases", key);
+    } catch {}
+  }
+  function savePhraseFromSelection() {
+    const sel = getSelectedText();
+    if (sel) addPhrase(sel);
+  }
+  const textShadow = themeKey === "neon" ? `0 0 8px ${t.text}99` : themeKey === "dusk" ? `0 0 12px ${t.text}44` : "none";
   const wordCount = content.trim() ? content.trim().split(/\s+/).length : 0;
   const lineCount = content ? content.split("\n").length : 0;
-
-  return (
-    <React.Fragment>
-      <style>{`
-        .lw-app{min-height:100vh;background:${t.bg};color:${t.text};transition:background 0.35s,color 0.35s;display:flex;flex-direction:column;font-family:system-ui,sans-serif;}
+  const panelOpen = panelTab !== null;
+  return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("style", null, `
+        .lw-app{min-height:100vh;background:${t.bg};color:${t.text};transition:background .35s,color .35s;display:flex;flex-direction:column;font-family:system-ui,sans-serif;}
         .lw-toolbar{background:${t.toolbar};border-bottom:1px solid ${t.border};padding:8px 16px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;position:sticky;top:0;z-index:50;}
         .lw-sep{width:1px;height:22px;background:${t.border};flex-shrink:0;margin:0 2px;}
-        .tb-btn{background:transparent;border:1px solid ${t.border};color:${t.text};padding:4px 9px;cursor:pointer;font-size:12px;border-radius:4px;transition:background 0.12s,border-color 0.12s;font-family:system-ui,sans-serif;line-height:1.4;white-space:nowrap;}
+        .tb-btn{background:transparent;border:1px solid ${t.border};color:${t.text};padding:4px 9px;cursor:pointer;font-size:12px;border-radius:4px;transition:background .12s,border-color .12s;line-height:1.4;white-space:nowrap;}
         .tb-btn:hover{background:${t.border};}
         .tb-btn.on{background:${t.accent};border-color:${t.accent};color:${t.accentText};}
-        .tb-select{background:${t.toolbar};border:1px solid ${t.border};color:${t.text};padding:4px 6px;font-size:12px;border-radius:4px;outline:none;cursor:pointer;font-family:system-ui,sans-serif;max-width:150px;}
-        .lw-save-btn{background:${t.accent};border:none;color:${t.accentText};padding:5px 18px;cursor:pointer;font-size:12px;border-radius:4px;font-family:system-ui,sans-serif;font-weight:700;letter-spacing:0.05em;transition:opacity 0.15s,transform 0.1s;margin-left:auto;flex-shrink:0;}
-        .lw-save-btn:hover{opacity:0.85;}
-        .lw-save-btn.flash{transform:scale(0.96);opacity:0.7;}
-        .theme-icon{width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:4px;cursor:pointer;border:1px solid ${t.border};background:transparent;color:${t.muted};transition:color 0.15s,border-color 0.15s,background 0.15s;flex-shrink:0;padding:0;}
+        .tb-icon{display:inline-flex;align-items:center;justify-content:center;padding:5px 8px;}
+        .tb-select{background:${t.toolbar};border:1px solid ${t.border};color:${t.text};padding:4px 6px;font-size:12px;border-radius:4px;outline:none;cursor:pointer;max-width:150px;}
+        .lw-save-btn{background:${t.accent};border:none;color:${t.accentText};padding:5px 18px;cursor:pointer;font-size:12px;border-radius:4px;font-weight:700;letter-spacing:.05em;transition:opacity .15s,transform .1s;flex-shrink:0;}
+        .lw-save-btn:hover{opacity:.85;}
+        .lw-save-btn.flash{transform:scale(.96);opacity:.7;}
+        .theme-icon{width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:4px;cursor:pointer;border:1px solid ${t.border};background:transparent;color:${t.muted};transition:all .15s;flex-shrink:0;padding:0;}
         .theme-icon:hover{color:${t.text};border-color:${t.text};}
         .theme-icon.active{color:${t.text};border-color:${t.text};background:${t.border};}
-        .lw-body{display:flex;flex-direction:column;align-items:center;padding:32px 20px 60px;flex:1;}
-        .lw-title-wrap{width:100%;max-width:${paperWidth};margin-bottom:4px;}
-        .lw-title{background:transparent;border:none;border-bottom:1px solid ${t.border};color:${t.text};font-family:${font};font-size:26px;font-weight:bold;width:100%;padding:6px 2px 10px;outline:none;transition:border-color 0.2s;text-shadow:${textShadow()};}
+        .lw-user-wrap{margin-left:auto;position:relative;display:flex;align-items:center;}
+        .lw-avatar{width:28px;height:28px;border-radius:50%;cursor:pointer;border:1px solid ${t.border};background:${t.border};display:flex;align-items:center;justify-content:center;color:${t.text};font-size:12px;font-weight:600;overflow:hidden;}
+        .lw-avatar img{width:100%;height:100%;object-fit:cover;display:block;}
+        .lw-signin-btn{display:inline-flex;align-items:center;gap:6px;background:${t.surface};border:1px solid ${t.border};color:${t.text};padding:5px 11px;font-size:12px;border-radius:5px;cursor:pointer;font-family:system-ui,sans-serif;white-space:nowrap;}
+        .lw-signin-btn:hover{border-color:${t.accent};}
+        .lw-user-menu{position:absolute;top:36px;right:0;background:${t.toolbar};border:1px solid ${t.border};border-radius:6px;padding:10px 12px;min-width:200px;box-shadow:0 4px 16px rgba(0,0,0,.3);z-index:60;}
+        .lw-user-email{font-size:12px;color:${t.muted};margin-bottom:8px;}
+        .lw-signout-btn{background:transparent;border:1px solid ${t.border};color:${t.text};padding:5px 10px;cursor:pointer;font-size:12px;border-radius:4px;width:100%;}
+        .lw-signout-btn:hover{background:${t.border};}
+
+        .lw-main{display:flex;flex:1;min-height:0;align-items:flex-start;}
+        .lw-body{display:flex;flex-direction:column;align-items:center;padding:32px 20px 60px;flex:1;min-width:0;}
+        .lw-title-wrap{width:100%;max-width:${paperWidth};}
+        .lw-title{background:transparent;border:none;border-bottom:1px solid ${t.border};color:${t.text};font-family:${font};font-size:26px;font-weight:bold;width:100%;padding:6px 2px 10px;outline:none;text-align:${align};text-shadow:${textShadow};}
         .lw-title::placeholder{color:${t.titlePlaceholder};}
         .lw-title:focus{border-bottom-color:${t.accent};}
-        .lw-paper{width:100%;max-width:${paperWidth};min-height:calc(100vh - 180px);background:${t.surface};position:relative;overflow:hidden;border-radius:2px;margin-top:16px;
-          ${themeKey === "neon" ? `border:1px solid ${t.border};box-shadow:0 0 24px ${t.text}0a,inset 0 0 40px rgba(0,0,0,0.5);` : ""}
-          ${themeKey === "midnight" ? `box-shadow:0 8px 48px rgba(0,0,0,0.6);` : ""}
-          ${themeKey === "daylight" ? `box-shadow:0 2px 24px rgba(0,0,0,0.08);border:1px solid ${t.border};` : ""}
-          ${themeKey === "parchment" ? `box-shadow:2px 4px 20px rgba(100,60,10,0.2);` : ""}
-          ${themeKey === "dusk" ? `box-shadow:0 8px 48px rgba(80,20,120,0.3);border:1px solid ${t.border};` : ""}
-        }
-        ${themeKey === "parchment" ? `.lw-paper::before{content:'';position:absolute;inset:0;pointer-events:none;background-image:repeating-linear-gradient(transparent,transparent 31px,rgba(139,90,43,0.1) 31px,rgba(139,90,43,0.1) 32px);}` : ""}
-        ${themeKey === "neon" ? `.lw-paper::after{content:'';position:absolute;inset:0;pointer-events:none;z-index:1;background:repeating-linear-gradient(0deg,rgba(0,245,160,0.015) 0px,rgba(0,245,160,0.015) 1px,transparent 1px,transparent 3px);}` : ""}
-        .lw-textarea{display:block;position:relative;z-index:2;width:100%;min-height:calc(100vh - 180px);padding:36px 44px;background:transparent;border:none;outline:none;resize:none;font-family:${font};font-size:${fontSize}px;font-weight:${bold ? "700" : "400"};font-style:${italic ? "italic" : "normal"};text-decoration:${underline ? "underline" : "none"};text-align:${align};color:${t.text};line-height:1.9;letter-spacing:0.02em;text-shadow:${textShadow()};transition:font-family 0.1s,font-size 0.1s;}
-        .lw-textarea::placeholder{color:${t.muted};font-style:italic;}
-        .lw-meta{width:100%;max-width:${paperWidth};margin-top:10px;display:flex;gap:16px;font-family:system-ui,sans-serif;font-size:11px;color:${t.muted};}
-        .lw-drawer-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:100;}
-        .lw-drawer{position:fixed;top:0;right:0;width:300px;height:100vh;background:${t.toolbar};border-left:1px solid ${t.border};z-index:101;display:flex;flex-direction:column;box-shadow:-4px 0 24px rgba(0,0,0,0.4);}
+        .lw-paper{width:100%;max-width:${paperWidth};min-height:calc(100vh - 190px);background:${t.surface};position:relative;overflow:hidden;border-radius:2px;margin-top:16px;
+          ${themeKey === "neon" ? `border:1px solid ${t.border};box-shadow:0 0 24px ${t.text}0a,inset 0 0 40px rgba(0,0,0,.5);` : ""}
+          ${themeKey === "midnight" ? `box-shadow:0 8px 48px rgba(0,0,0,.6);` : ""}
+          ${themeKey === "daylight" ? `box-shadow:0 2px 24px rgba(0,0,0,.08);border:1px solid ${t.border};` : ""}
+          ${themeKey === "parchment" ? `box-shadow:2px 4px 20px rgba(100,60,10,.2);` : ""}
+          ${themeKey === "dusk" ? `box-shadow:0 8px 48px rgba(80,20,120,.3);border:1px solid ${t.border};` : ""}}
+        ${themeKey === "parchment" ? `.lw-paper::before{content:'';position:absolute;inset:0;pointer-events:none;background-image:repeating-linear-gradient(transparent,transparent 31px,rgba(139,90,43,.1) 31px,rgba(139,90,43,.1) 32px);}` : ""}
+        ${themeKey === "neon" ? `.lw-paper::after{content:'';position:absolute;inset:0;pointer-events:none;z-index:1;background:repeating-linear-gradient(0deg,rgba(0,245,160,.015) 0,rgba(0,245,160,.015) 1px,transparent 1px,transparent 3px);}` : ""}
+        .lw-textarea{display:block;position:relative;z-index:2;width:100%;min-height:calc(100vh - 190px);padding:36px 44px;background:transparent;border:none;outline:none;resize:none;font-family:${font};font-size:${fontSize}px;font-weight:${bold ? 700 : 400};font-style:${italic ? "italic" : "normal"};text-decoration:${underline ? "underline" : "none"};text-align:${align};color:${t.text};line-height:1.9;letter-spacing:.02em;text-shadow:${textShadow};}
+        .lw-meta{width:100%;max-width:${paperWidth};margin-top:10px;display:flex;gap:16px;font-size:11px;color:${t.muted};}
+
+        .lw-panel{width:320px;flex-shrink:0;background:${t.toolbar};border-left:1px solid ${t.border};display:flex;flex-direction:column;position:sticky;top:49px;height:calc(100vh - 49px);}
+        .panel-tabs{display:flex;border-bottom:1px solid ${t.border};align-items:center;}
+        .panel-tab{flex:1;padding:10px 4px;background:transparent;border:none;border-bottom:2px solid transparent;color:${t.muted};font-size:11px;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;font-weight:600;}
+        .panel-tab:hover{color:${t.text};}
+        .panel-tab.active{color:${t.text};border-bottom-color:${t.accent};}
+        .panel-close{background:transparent;border:none;color:${t.muted};cursor:pointer;font-size:15px;padding:8px 10px;}
+        .panel-close:hover{color:${t.text};}
+        .panel-scroll{flex:1;overflow-y:auto;padding:14px;}
+        .panel-label{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:${t.muted};margin-bottom:6px;font-weight:600;}
+        .panel-input{width:100%;background:${t.surface};border:1px solid ${t.border};color:${t.text};padding:7px 9px;font-size:13px;border-radius:4px;outline:none;font-family:system-ui,sans-serif;}
+        .panel-input:focus{border-color:${t.accent};}
+        .panel-row{display:flex;gap:6px;margin-bottom:10px;}
+        .mode-row{display:flex;gap:4px;margin-bottom:12px;flex-wrap:wrap;}
+        .mode-btn{flex:1;padding:5px 4px;font-size:11px;background:transparent;border:1px solid ${t.border};color:${t.muted};border-radius:4px;cursor:pointer;min-width:60px;}
+        .mode-btn:hover{color:${t.text};}
+        .mode-btn.on{background:${t.accent};border-color:${t.accent};color:${t.accentText};}
+        .chip-wrap{display:flex;flex-wrap:wrap;gap:5px;}
+        .chip{background:${t.surface};border:1px solid ${t.border};color:${t.text};padding:4px 9px;font-size:12px;border-radius:12px;cursor:pointer;transition:background .1s;}
+        .chip:hover{background:${t.accent};border-color:${t.accent};color:${t.accentText};}
+        .phrase-item{background:${t.surface};border:1px solid ${t.border};border-radius:4px;padding:9px 10px;margin-bottom:6px;display:flex;gap:8px;align-items:flex-start;}
+        .phrase-block{flex-direction:column;gap:7px;}
+        .phrase-top{display:flex;gap:8px;align-items:flex-start;width:100%;}
+        .phrase-foot{display:flex;align-items:center;justify-content:space-between;width:100%;gap:8px;}
+        .phrase-count{font-size:10.5px;color:${t.muted};}
+        .phrase-map-btn{background:transparent;border:1px solid ${t.border};color:${t.text};font-size:11px;padding:4px 10px;border-radius:4px;cursor:pointer;white-space:nowrap;}
+        .phrase-map-btn:hover{background:${t.accent};border-color:${t.accent};color:${t.accentText};}
+        .phrase-text{flex:1;font-size:13px;line-height:1.5;color:${t.text};cursor:pointer;word-break:break-word;}
+        .phrase-text:hover{color:${t.accent};}
+        .mini-del{background:transparent;border:none;color:${t.muted};cursor:pointer;font-size:15px;line-height:1;padding:0 2px;flex-shrink:0;}
+        .mini-del:hover{color:#e53935;}
+        .bucket{margin-bottom:18px;}
+        .node-item{background:${t.surface};border:1px solid ${t.border};border-radius:4px;padding:8px 8px 8px 10px;margin-bottom:5px;display:flex;gap:4px;align-items:center;}
+        .node-text{flex:1;font-size:13px;line-height:1.45;color:${t.text};cursor:pointer;word-break:break-word;display:flex;align-items:center;gap:7px;}
+        .node-text:hover{color:${t.accent};}
+        .node-count{background:${t.border};color:${t.muted};font-size:10px;padding:1px 6px;border-radius:8px;flex-shrink:0;}
+        .node-act{background:transparent;border:none;color:${t.muted};cursor:pointer;font-size:13px;padding:2px 5px;flex-shrink:0;border-radius:3px;}
+        .node-act:hover{color:${t.accentText};background:${t.accent};}
+        .crumbs{font-size:11px;color:${t.muted};margin-bottom:14px;line-height:1.7;}
+        .crumb{cursor:pointer;}
+        .crumb:hover{color:${t.text};}
+        .crumb.current{color:${t.text};font-weight:600;cursor:default;}
+        .crumb-sep{margin:0 5px;opacity:.6;}
+        .branch-head{border-left:2px solid ${t.accent};padding-left:11px;margin-bottom:18px;}
+        .branch-title{font-family:${font};font-size:19px;color:${t.text};line-height:1.35;margin-bottom:9px;word-break:break-word;}
+        .branch-actions{display:flex;gap:6px;}
+        .panel-note{font-size:11px;color:${t.muted};line-height:1.5;}
+        .panel-empty{font-size:12px;color:${t.muted};line-height:1.6;padding:14px 0;}
+        .small-btn{background:transparent;border:1px solid ${t.border};color:${t.text};padding:6px 10px;font-size:11px;border-radius:4px;cursor:pointer;white-space:nowrap;}
+        .small-btn:hover{background:${t.border};}
+        .go-btn{background:${t.accent};border:none;color:${t.accentText};padding:7px 12px;font-size:12px;border-radius:4px;cursor:pointer;font-weight:600;}
+
+        .lw-drawer-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:100;}
+        .lw-drawer{position:fixed;top:0;right:0;width:300px;height:100vh;background:${t.toolbar};border-left:1px solid ${t.border};z-index:101;display:flex;flex-direction:column;box-shadow:-4px 0 24px rgba(0,0,0,.4);}
         .lw-drawer-head{padding:16px 16px 12px;border-bottom:1px solid ${t.border};display:flex;align-items:center;justify-content:space-between;}
-        .lw-drawer-title{font-family:system-ui,sans-serif;font-size:13px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:${t.text};}
+        .lw-drawer-title{font-size:13px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:${t.text};}
         .lw-drawer-list{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:6px;}
-        .song-row{padding:12px;border:1px solid ${t.border};border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;transition:background 0.12s;}
+        .song-row{padding:12px;border:1px solid ${t.border};border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;}
         .song-row:hover{background:${t.border};}
         .song-row-info{flex:1;min-width:0;}
         .song-row-title{font-family:${font};font-size:14px;color:${t.text};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-        .song-row-date{font-size:10px;color:${t.muted};font-family:system-ui,sans-serif;margin-top:2px;}
-        .song-del{background:transparent;border:none;color:${t.muted};cursor:pointer;font-size:18px;line-height:1;padding:2px 6px;transition:color 0.12s;flex-shrink:0;}
+        .song-row-date{font-size:10px;color:${t.muted};margin-top:2px;}
+        .song-del{background:transparent;border:none;color:${t.muted};cursor:pointer;font-size:18px;line-height:1;padding:2px 6px;flex-shrink:0;}
         .song-del:hover{color:#e53935;}
-        .lw-empty{text-align:center;padding:40px 20px;font-family:system-ui,sans-serif;font-size:13px;color:${t.muted};line-height:1.6;}
-        .lw-new-btn{margin:12px;padding:10px;background:transparent;border:1px dashed ${t.border};border-radius:4px;color:${t.muted};font-family:system-ui,sans-serif;font-size:12px;cursor:pointer;transition:color 0.12s,border-color 0.12s;letter-spacing:0.05em;}
+        .lw-empty{text-align:center;padding:40px 20px;font-size:13px;color:${t.muted};line-height:1.6;}
+        .lw-new-btn{margin:12px;padding:10px;background:transparent;border:1px dashed ${t.border};border-radius:4px;color:${t.muted};font-size:12px;cursor:pointer;letter-spacing:.05em;}
         .lw-new-btn:hover{color:${t.text};border-color:${t.text};}
-      `}</style>
-
-      <div className="lw-app">
-        <div className="lw-toolbar">
-          {Object.entries(THEMES).map(([key, th]) => (
-            <button
-              key={key}
-              className={`theme-icon ${themeKey === key ? "active" : ""}`}
-              title={th.name}
-              onClick={() => switchTheme(key)}
-              aria-label={th.name}
-            >
-              {THEME_ICONS[key]}
-            </button>
-          ))}
-
-          <div className="lw-sep" />
-
-          <select className="tb-select" value={font} onChange={e => setFont(e.target.value)}>
-            {FONTS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
-          </select>
-
-          <select className="tb-select" style={{ maxWidth: 64 }} value={fontSize} onChange={e => setFontSize(Number(e.target.value))}>
-            {FONT_SIZES.map(s => <option key={s} value={s}>{s}</option>)}
-          </select>
-
-          <div className="lw-sep" />
-
-          <button className={`tb-btn ${bold ? "on" : ""}`} onClick={() => setBold(!bold)} style={{ fontWeight: "bold" }}>B</button>
-          <button className={`tb-btn ${italic ? "on" : ""}`} onClick={() => setItalic(!italic)} style={{ fontStyle: "italic" }}>I</button>
-          <button className={`tb-btn ${underline ? "on" : ""}`} onClick={() => setUnderline(!underline)} style={{ textDecoration: "underline" }}>U</button>
-
-          <div className="lw-sep" />
-
-          <button className={`tb-btn ${align === "left" ? "on" : ""}`} onClick={() => setAlign("left")} title="Align left">⬅</button>
-          <button className={`tb-btn ${align === "center" ? "on" : ""}`} onClick={() => setAlign("center")} title="Center">↔</button>
-          <button className={`tb-btn ${align === "right" ? "on" : ""}`} onClick={() => setAlign("right")} title="Align right">➡</button>
-
-          <div className="lw-sep" />
-
-          <button className="tb-btn" onClick={handleNew}>New</button>
-          <button className="tb-btn" onClick={() => { setDrawerOpen(true); refreshList(); }}>Songs</button>
-
-          <div className="lw-sep" />
-
-          <select className="tb-select" value={pageWidth} onChange={e => setPageWidth(e.target.value)} title="Page width">
-            {Object.entries(WIDTHS).map(([k, w]) => (
-              <option key={k} value={k}>{w.label}</option>
-            ))}
-          </select>
-
-          <button className={`lw-save-btn${saveFlash ? " flash" : ""}`} onClick={handleSave}>
-            {saveFlash ? "Saved ✓" : "Save"}
-          </button>
-        </div>
-
-        <div className="lw-body">
-          <div className="lw-title-wrap">
-            <input
-              className="lw-title"
-              value={title}
-              onChange={e => setTitle(e.target.value)}
-              placeholder="Song title..."
-            />
-          </div>
-
-          <div className="lw-paper">
-            <textarea
-              className="lw-textarea"
-              value={content}
-              onChange={e => setContent(e.target.value)}
-              placeholder=""
-              spellCheck={false}
-            />
-          </div>
-
-          <div className="lw-meta">
-            <span>{wordCount} words</span>
-            <span>{lineCount} lines</span>
-            <span style={{ marginLeft: "auto" }}>{THEMES[themeKey].name}</span>
-          </div>
-        </div>
-      </div>
-
-      {drawerOpen && (
-        <React.Fragment>
-          <div className="lw-drawer-overlay" onClick={() => setDrawerOpen(false)} />
-          <div className="lw-drawer">
-            <div className="lw-drawer-head">
-              <span className="lw-drawer-title">My Songs</span>
-              <button className="tb-btn" onClick={() => setDrawerOpen(false)}>✕ Close</button>
-            </div>
-
-            <div className="lw-drawer-list">
-              {savedSongs.length === 0 ? (
-                <div className="lw-empty">No saved songs yet.<br />Write something and hit Save.</div>
-              ) : (
-                savedSongs.map(song => (
-                  <div key={song.key} className="song-row" onClick={() => handleLoad(song.key)}>
-                    <div className="song-row-info">
-                      <div className="song-row-title">{song.title}</div>
-                      <div className="song-row-date">{formatDate(song.date)}</div>
-                    </div>
-                    <button className="song-del" onClick={e => handleDelete(e, song.key)} title="Delete">×</button>
-                  </div>
-                ))
-              )}
-            </div>
-
-            <button className="lw-new-btn" onClick={() => { handleNew(); setDrawerOpen(false); }}>
-              + New Song
-            </button>
-          </div>
-        </React.Fragment>
-      )}
-    </React.Fragment>
-  );
+      `), /*#__PURE__*/React.createElement("div", {
+    className: "lw-app"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "lw-toolbar"
+  }, Object.entries(THEMES).map(([key, th]) => /*#__PURE__*/React.createElement("button", {
+    key: key,
+    className: `theme-icon ${themeKey === key ? "active" : ""}`,
+    title: th.name,
+    onClick: () => switchTheme(key)
+  }, THEME_ICONS[key])), /*#__PURE__*/React.createElement("div", {
+    className: "lw-sep"
+  }), /*#__PURE__*/React.createElement("select", {
+    className: "tb-select",
+    value: font,
+    onChange: e => setFont(e.target.value)
+  }, FONTS.map(f => /*#__PURE__*/React.createElement("option", {
+    key: f.value,
+    value: f.value
+  }, f.label))), /*#__PURE__*/React.createElement("select", {
+    className: "tb-select",
+    style: {
+      maxWidth: 62
+    },
+    value: fontSize,
+    onChange: e => setFontSize(Number(e.target.value))
+  }, FONT_SIZES.map(s => /*#__PURE__*/React.createElement("option", {
+    key: s,
+    value: s
+  }, s))), /*#__PURE__*/React.createElement("div", {
+    className: "lw-sep"
+  }), /*#__PURE__*/React.createElement("button", {
+    className: `tb-btn ${bold ? "on" : ""}`,
+    onClick: () => setBold(!bold),
+    style: {
+      fontWeight: "bold"
+    }
+  }, "B"), /*#__PURE__*/React.createElement("button", {
+    className: `tb-btn ${italic ? "on" : ""}`,
+    onClick: () => setItalic(!italic),
+    style: {
+      fontStyle: "italic"
+    }
+  }, "I"), /*#__PURE__*/React.createElement("button", {
+    className: `tb-btn ${underline ? "on" : ""}`,
+    onClick: () => setUnderline(!underline),
+    style: {
+      textDecoration: "underline"
+    }
+  }, "U"), /*#__PURE__*/React.createElement("div", {
+    className: "lw-sep"
+  }), ALIGN_OPTIONS.map(a => /*#__PURE__*/React.createElement("button", {
+    key: a.key,
+    className: `tb-btn tb-icon ${align === a.key ? "on" : ""}`,
+    onClick: () => setAlign(a.key),
+    title: a.label,
+    "aria-label": a.label
+  }, a.icon)), /*#__PURE__*/React.createElement("div", {
+    className: "lw-sep"
+  }), /*#__PURE__*/React.createElement("button", {
+    className: `tb-btn ${panelTab === "rhyme" ? "on" : ""}`,
+    onClick: () => setPanelTab(panelTab === "rhyme" ? null : "rhyme")
+  }, "Rhymes"), /*#__PURE__*/React.createElement("button", {
+    className: `tb-btn ${panelTab === "phrases" ? "on" : ""}`,
+    onClick: () => setPanelTab(panelTab === "phrases" ? null : "phrases")
+  }, "Phrases"), /*#__PURE__*/React.createElement("button", {
+    className: "tb-btn",
+    onClick: () => setTopicsOpen(true)
+  }, "Topics"), /*#__PURE__*/React.createElement("div", {
+    className: "lw-sep"
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "tb-btn",
+    onClick: handleNew
+  }, "New"), /*#__PURE__*/React.createElement("button", {
+    className: "tb-btn",
+    onClick: () => {
+      setDrawerOpen(true);
+      refreshList();
+    }
+  }, "Songs"), /*#__PURE__*/React.createElement("select", {
+    className: "tb-select",
+    style: {
+      maxWidth: 90
+    },
+    value: pageWidth,
+    onChange: e => setPageWidth(e.target.value),
+    title: "Page width"
+  }, Object.entries(WIDTHS).map(([k, w]) => /*#__PURE__*/React.createElement("option", {
+    key: k,
+    value: k
+  }, w.label))), /*#__PURE__*/React.createElement("button", {
+    className: `lw-save-btn${saveFlash ? " flash" : ""}`,
+    onClick: handleSave
+  }, saveFlash ? "Saved ✓" : "Save"), /*#__PURE__*/React.createElement("div", {
+    className: "lw-user-wrap"
+  }, user ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "lw-avatar",
+    onClick: () => setMenuOpen(!menuOpen),
+    title: user.displayName || user.email
+  }, user.photoURL ? /*#__PURE__*/React.createElement("img", {
+    src: user.photoURL,
+    alt: "",
+    referrerPolicy: "no-referrer"
+  }) : (user.email || "?").charAt(0).toUpperCase()), menuOpen && /*#__PURE__*/React.createElement("div", {
+    className: "lw-user-menu"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "lw-user-email"
+  }, user.email), /*#__PURE__*/React.createElement("button", {
+    className: "lw-signout-btn",
+    onClick: onSignOut
+  }, "Sign out"))) : /*#__PURE__*/React.createElement("button", {
+    className: "lw-signin-btn",
+    onClick: onSignIn
+  }, /*#__PURE__*/React.createElement("svg", {
+    width: "14",
+    height: "14",
+    viewBox: "0 0 18 18",
+    style: {
+      flexShrink: 0
+    }
+  }, /*#__PURE__*/React.createElement("path", {
+    fill: "#4285F4",
+    d: "M16.51 8.18c0-.57-.05-1.13-.15-1.66H9v3.13h4.21c-.18.97-.74 1.79-1.57 2.34v1.95h2.54c1.49-1.37 2.34-3.39 2.34-5.76z"
+  }), /*#__PURE__*/React.createElement("path", {
+    fill: "#34A853",
+    d: "M9 17c2.13 0 3.92-.7 5.22-1.91l-2.54-1.95c-.71.48-1.61.76-2.68.76-2.06 0-3.81-1.39-4.43-3.27H1.93v2.05A8 8 0 0 0 9 17z"
+  }), /*#__PURE__*/React.createElement("path", {
+    fill: "#FBBC05",
+    d: "M4.57 10.63A4.8 4.8 0 0 1 4.32 9c0-.57.1-1.12.25-1.63V5.32H1.93A8 8 0 0 0 1 9c0 1.29.31 2.51.93 3.59l2.64-1.96z"
+  }), /*#__PURE__*/React.createElement("path", {
+    fill: "#EA4335",
+    d: "M9 4.13c1.16 0 2.21.4 3.03 1.18l2.26-2.26C12.92 1.76 11.13 1 9 1A8 8 0 0 0 1.93 5.32l2.64 2.05C5.19 5.52 6.94 4.13 9 4.13z"
+  })), "Sign in"))), /*#__PURE__*/React.createElement("div", {
+    className: "lw-main"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "lw-body"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "lw-title-wrap"
+  }, /*#__PURE__*/React.createElement("input", {
+    className: "lw-title",
+    value: title,
+    onChange: e => setTitle(e.target.value),
+    placeholder: "Song title..."
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "lw-paper"
+  }, /*#__PURE__*/React.createElement("textarea", {
+    ref: textRef,
+    className: "lw-textarea",
+    value: content,
+    onChange: e => setContent(e.target.value),
+    spellCheck: false
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "lw-meta"
+  }, /*#__PURE__*/React.createElement("span", null, wordCount, " words"), /*#__PURE__*/React.createElement("span", null, lineCount, " lines"), /*#__PURE__*/React.createElement("span", {
+    style: {
+      marginLeft: "auto"
+    }
+  }, t.name))), panelOpen && /*#__PURE__*/React.createElement("div", {
+    className: "lw-panel"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "panel-tabs"
+  }, /*#__PURE__*/React.createElement("button", {
+    className: `panel-tab ${panelTab === "rhyme" ? "active" : ""}`,
+    onClick: () => setPanelTab("rhyme")
+  }, "Rhymes"), /*#__PURE__*/React.createElement("button", {
+    className: `panel-tab ${panelTab === "phrases" ? "active" : ""}`,
+    onClick: () => setPanelTab("phrases")
+  }, "Phrases"), /*#__PURE__*/React.createElement("button", {
+    className: "panel-close",
+    onClick: () => setPanelTab(null)
+  }, "✕")), /*#__PURE__*/React.createElement("div", {
+    className: "panel-scroll"
+  }, panelTab === "rhyme" && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "panel-label"
+  }, "Look up a word"), /*#__PURE__*/React.createElement("div", {
+    className: "panel-row"
+  }, /*#__PURE__*/React.createElement("input", {
+    className: "panel-input",
+    value: rhymeWord,
+    onChange: e => setRhymeWord(e.target.value),
+    onKeyDown: e => {
+      if (e.key === "Enter") lookupRhymes(rhymeWord, rhymeMode);
+    },
+    placeholder: "e.g. river"
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "go-btn",
+    onClick: () => lookupRhymes(rhymeWord, rhymeMode)
+  }, "Go")), /*#__PURE__*/React.createElement("button", {
+    className: "small-btn",
+    style: {
+      width: "100%",
+      marginBottom: 12
+    },
+    onClick: useSelectionForRhyme
+  }, "Use word selected in lyrics"), /*#__PURE__*/React.createElement("div", {
+    className: "mode-row"
+  }, RHYME_MODES.map(m => /*#__PURE__*/React.createElement("button", {
+    key: m.key,
+    className: `mode-btn ${rhymeMode === m.key ? "on" : ""}`,
+    onClick: () => {
+      setRhymeMode(m.key);
+      if (rhymeWord.trim()) lookupRhymes(rhymeWord, m.key);
+    }
+  }, m.label))), rhymeLoading && /*#__PURE__*/React.createElement("div", {
+    className: "panel-empty"
+  }, "Looking up..."), rhymeError && /*#__PURE__*/React.createElement("div", {
+    className: "panel-empty"
+  }, rhymeError), !rhymeLoading && rhymeResults.length > 0 && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "panel-label"
+  }, rhymeResults.length, " results — click to insert"), /*#__PURE__*/React.createElement("div", {
+    className: "chip-wrap"
+  }, rhymeResults.map((w, i) => /*#__PURE__*/React.createElement("button", {
+    key: i,
+    className: "chip",
+    onClick: () => insertAtCursor(w)
+  }, w)))), !rhymeLoading && !rhymeError && rhymeResults.length === 0 && /*#__PURE__*/React.createElement("div", {
+    className: "panel-empty"
+  }, "Straight dictionary lookup. Results come from a rhyming database — nothing is generated.")), panelTab === "phrases" && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "panel-label"
+  }, "Save a phrase"), /*#__PURE__*/React.createElement("div", {
+    className: "panel-row"
+  }, /*#__PURE__*/React.createElement("input", {
+    className: "panel-input",
+    value: phraseInput,
+    onChange: e => setPhraseInput(e.target.value),
+    onKeyDown: e => {
+      if (e.key === "Enter") addPhrase(phraseInput);
+    },
+    placeholder: "A line you want to keep..."
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "go-btn",
+    onClick: () => addPhrase(phraseInput)
+  }, "+")), /*#__PURE__*/React.createElement("button", {
+    className: "small-btn",
+    style: {
+      width: "100%",
+      marginBottom: 14
+    },
+    onClick: savePhraseFromSelection
+  }, "Save selected text from lyrics"), phraseError && /*#__PURE__*/React.createElement("div", {
+    className: "panel-empty",
+    style: {
+      paddingTop: 0
+    }
+  }, phraseError), /*#__PURE__*/React.createElement("div", {
+    className: "panel-label"
+  }, "Your phrases (", phrases.length, ")"), phrases.length === 0 ? /*#__PURE__*/React.createElement("div", {
+    className: "panel-empty"
+  }, "Nothing saved yet. Phrases carry across all your songs — a scrap heap for lines you aren't ready to use.") : phrases.map(p => /*#__PURE__*/React.createElement("div", {
+    key: p.key,
+    className: "phrase-item phrase-block"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "phrase-top"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "phrase-text",
+    onClick: () => insertAtCursor(p.text),
+    title: "Click to insert"
+  }, p.text), /*#__PURE__*/React.createElement("button", {
+    className: "mini-del",
+    onClick: () => deletePhrase(p.key)
+  }, "×")), /*#__PURE__*/React.createElement("div", {
+    className: "phrase-foot"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "phrase-count"
+  }, countAllNodes(p.root) === 0 ? "no map yet" : `${countAllNodes(p.root)} mapped`), /*#__PURE__*/React.createElement("button", {
+    className: "phrase-map-btn",
+    onClick: () => setActivePhraseKey(p.key)
+  }, "Open map ›"))))))))), topicsOpen && activeTopicId === null && /*#__PURE__*/React.createElement(TopicsPage, {
+    theme: t,
+    font: font,
+    songTitle: title,
+    topics: topics,
+    setTopics: setTopics,
+    onOpen: id => setActiveTopicId(id),
+    onClose: () => setTopicsOpen(false)
+  }), activePhrase && /*#__PURE__*/React.createElement(TopicMap, {
+    theme: t,
+    font: font,
+    topicName: activePhrase.text,
+    root: activePhrase.root,
+    setRoot: updater => setPhraseRoot(activePhrase.key, updater),
+    onBack: () => setActivePhraseKey(null),
+    onClose: () => setActivePhraseKey(null),
+    onInsert: txt => {
+      insertAtCursor(txt);
+      setActivePhraseKey(null);
+    },
+    phrases: phrases,
+    onSavePhrase: addPhrase,
+    backLabel: "Phrases"
+  }), topicsOpen && activeTopic && /*#__PURE__*/React.createElement(TopicMap, {
+    theme: t,
+    font: font,
+    topicName: activeTopic.name,
+    root: activeTopic.root,
+    setRoot: updater => setTopics(prev => prev.map(tp => tp.id === activeTopic.id ? {
+      ...tp,
+      root: typeof updater === "function" ? updater(tp.root) : updater
+    } : tp)),
+    onBack: () => setActiveTopicId(null),
+    onClose: () => {
+      setTopicsOpen(false);
+      setActiveTopicId(null);
+    },
+    onInsert: txt => {
+      insertAtCursor(txt);
+      setTopicsOpen(false);
+      setActiveTopicId(null);
+    },
+    phrases: phrases,
+    onSavePhrase: addPhrase
+  }), drawerOpen && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "lw-drawer-overlay",
+    onClick: () => setDrawerOpen(false)
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "lw-drawer"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "lw-drawer-head"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "lw-drawer-title"
+  }, "My Songs"), /*#__PURE__*/React.createElement("button", {
+    className: "tb-btn",
+    onClick: () => setDrawerOpen(false)
+  }, "✕ Close")), /*#__PURE__*/React.createElement("div", {
+    className: "lw-drawer-list"
+  }, savedSongs.length === 0 ? /*#__PURE__*/React.createElement("div", {
+    className: "lw-empty"
+  }, "No saved songs yet.", /*#__PURE__*/React.createElement("br", null), "Write something and hit Save.") : savedSongs.map(song => /*#__PURE__*/React.createElement("div", {
+    key: song.key,
+    className: "song-row",
+    onClick: () => handleLoad(song.key)
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "song-row-info"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "song-row-title"
+  }, song.title), /*#__PURE__*/React.createElement("div", {
+    className: "song-row-date"
+  }, formatDate(song.date))), /*#__PURE__*/React.createElement("button", {
+    className: "song-del",
+    onClick: e => handleDelete(e, song.key)
+  }, "×")))), /*#__PURE__*/React.createElement("button", {
+    className: "lw-new-btn",
+    onClick: () => {
+      handleNew();
+      setDrawerOpen(false);
+    }
+  }, "+ New Song"))));
 }
 
-const root = ReactDOM.createRoot(document.getElementById("root"));
-root.render(<LyricWriter />);
+// ---- mount ----
+function mountApp() {
+  const el = document.getElementById("root");
+  try {
+    ReactDOM.createRoot(el).render(React.createElement(App));
+  } catch (err) {
+    el.innerHTML = '<div style="padding:40px;font-family:system-ui,sans-serif;color:#2a160a;line-height:1.6">' + '<b>The app failed to start.</b><br>' + String(err && err.message ? err.message : err) + '</div>';
+  }
+}    mountApp();
+  }
+
+  var tries = 0;
+  (function poll() {
+    if (window.React && window.ReactDOM && window.ReactDOM.createRoot) {
+      try {
+        startLyricWriter();
+      } catch (err) {
+        document.getElementById("root").innerHTML =
+          '<div class="boot"><b>The app failed to start.</b><br>' +
+          String(err && err.message ? err.message : err) + '</div>';
+      }
+      return;
+    }
+    if (++tries > 120) {
+      document.getElementById("root").innerHTML =
+        '<div class="boot"><b>Could not load React from the CDN.</b><br>' +
+        'Check your connection and refresh the page.</div>';
+      return;
+    }
+    setTimeout(poll, 100);
+  })();
+})();
 </script>
 </body>
 </html>
