@@ -36,6 +36,11 @@
      storing everything locally in this browser.
      ============================================================ -->
 <script>
+  // Google Identity Services client ID — needed for in-app sign-in on iOS.
+  // Firebase Console -> Authentication -> Sign-in method -> Google
+  //   -> Web SDK configuration -> Web client ID
+  window.GOOGLE_CLIENT_ID = "PASTE_WEB_CLIENT_ID_HERE";
+
   window.FIREBASE_CONFIG = {
     apiKey: "AIzaSyDJSYw7yAnsvu_zBYh7UkdBPSlZtBxZMKg",
     authDomain: "lyric-writer-685d1.firebaseapp.com",
@@ -94,6 +99,9 @@ window.Store = {
   }
 };
 </script>
+
+<!-- Google Identity Services: renders sign-in in-page (no popup, no redirect) -->
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 
 <!-- Firebase (optional layer — the app never waits on it) -->
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
@@ -1007,10 +1015,69 @@ function isStandalone() {
   }
 }
 function SignInScreen({
-  onSignIn,
+  onCredential,
+  onPopupSignIn,
   error,
-  busy
+  busy,
+  setError
 }) {
+  const btnRef = useRef(null);
+  const didInit = useRef(false);
+  const [gisReady, setGisReady] = useState(false);
+  const [gisFailed, setGisFailed] = useState(false);
+  useEffect(() => {
+    if (didInit.current) return;
+    const clientId = window.GOOGLE_CLIENT_ID || "";
+    if (!clientId || clientId.indexOf("PASTE_") === 0) {
+      setGisFailed(true);
+      return;
+    }
+    didInit.current = true;
+    let tries = 0;
+    let cancelled = false;
+    (function poll() {
+      if (cancelled) return;
+      const gid = window.google && window.google.accounts && window.google.accounts.id;
+      if (gid) {
+        try {
+          gid.initialize({
+            client_id: clientId,
+            callback: resp => {
+              if (resp && resp.credential) onCredential(resp.credential);
+            },
+            auto_select: false,
+            cancel_on_tap_outside: true,
+            use_fedcm_for_prompt: true
+          });
+          if (btnRef.current) {
+            btnRef.current.innerHTML = "";
+            gid.renderButton(btnRef.current, {
+              theme: "outline",
+              size: "large",
+              type: "standard",
+              text: "signin_with",
+              shape: "pill",
+              logo_alignment: "left",
+              width: 260
+            });
+          }
+          setGisReady(true);
+        } catch (e) {
+          console.warn("Google Identity init failed:", e);
+          setGisFailed(true);
+        }
+        return;
+      }
+      if (++tries > 60) {
+        setGisFailed(true);
+        return;
+      }
+      setTimeout(poll, 100);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   return /*#__PURE__*/React.createElement("div", {
     className: "si-wrap"
   }, /*#__PURE__*/React.createElement("style", null, `
@@ -1018,14 +1085,16 @@ function SignInScreen({
           background:#ede0c0;color:#2a160a;padding:28px;text-align:center;font-family:system-ui,sans-serif;}
         .si-mark{margin-bottom:26px;}
         .si-title{font-family:'IM Fell English',serif;font-size:40px;font-weight:400;letter-spacing:.01em;margin-bottom:10px;}
-        .si-sub{font-size:14.5px;color:#6a4a2a;line-height:1.65;max-width:330px;margin-bottom:36px;}
+        .si-sub{font-size:14.5px;color:#6a4a2a;line-height:1.65;max-width:330px;margin-bottom:34px;}
+        .si-gbtn{min-height:44px;display:flex;justify-content:center;}
         .si-btn{display:inline-flex;align-items:center;gap:11px;background:#fff;border:1px solid #c4a86a;
           color:#2a160a;padding:13px 24px;font-size:14.5px;font-weight:500;border-radius:7px;cursor:pointer;
-          box-shadow:0 2px 8px rgba(100,60,10,.14);transition:transform .12s,box-shadow .15s;}
-        .si-btn:hover{transform:translateY(-1px);box-shadow:0 4px 14px rgba(100,60,10,.2);}
-        .si-btn:disabled{opacity:.6;cursor:default;transform:none;}
-        .si-err{color:#a3341f;font-size:12.5px;margin-top:22px;max-width:330px;line-height:1.6;}
-        .si-foot{font-size:11.5px;color:#a08050;margin-top:34px;}
+          box-shadow:0 2px 8px rgba(100,60,10,.14);}
+        .si-btn:disabled{opacity:.6;cursor:default;}
+        .si-err{color:#a3341f;font-size:12.5px;margin-top:22px;max-width:340px;line-height:1.6;}
+        .si-foot{font-size:11.5px;color:#a08050;margin-top:30px;max-width:320px;line-height:1.6;}
+        .si-alt{background:none;border:none;color:#8b4513;font-size:12px;text-decoration:underline;
+          text-underline-offset:3px;cursor:pointer;margin-top:20px;font-family:system-ui,sans-serif;}
       `), /*#__PURE__*/React.createElement("svg", {
     className: "si-mark",
     width: "76",
@@ -1067,9 +1136,15 @@ function SignInScreen({
     className: "si-title"
   }, "Lyric Writer"), /*#__PURE__*/React.createElement("p", {
     className: "si-sub"
-  }, "Sign in to reach your songs, phrases, and topic maps from any device."), /*#__PURE__*/React.createElement("button", {
+  }, "Sign in to reach your songs, phrases, and topic maps from any device."), /*#__PURE__*/React.createElement("div", {
+    className: "si-gbtn",
+    ref: btnRef,
+    style: {
+      display: gisFailed ? "none" : "flex"
+    }
+  }), gisFailed && /*#__PURE__*/React.createElement("button", {
     className: "si-btn",
-    onClick: onSignIn,
+    onClick: onPopupSignIn,
     disabled: busy
   }, /*#__PURE__*/React.createElement("svg", {
     width: "18",
@@ -1090,11 +1165,14 @@ function SignInScreen({
   }), /*#__PURE__*/React.createElement("path", {
     fill: "#EA4335",
     d: "M9 4.13c1.16 0 2.21.4 3.03 1.18l2.26-2.26C12.92 1.76 11.13 1 9 1A8 8 0 0 0 1.93 5.32l2.64 2.05C5.19 5.52 6.94 4.13 9 4.13z"
-  })), busy ? "Opening Google\u2026" : "Sign in with Google"), error && /*#__PURE__*/React.createElement("div", {
-    className: "si-err"
-  }, error), isStandalone() && !error && /*#__PURE__*/React.createElement("div", {
+  })), busy ? "Opening Google\u2026" : "Sign in with Google"), busy && !gisFailed && /*#__PURE__*/React.createElement("div", {
     className: "si-foot"
-  }, "Signing in here is separate from Safari — this only needs doing once."));
+  }, "Signing in\\u2026"), error && /*#__PURE__*/React.createElement("div", {
+    className: "si-err"
+  }, error), gisReady && !busy && /*#__PURE__*/React.createElement("button", {
+    className: "si-alt",
+    onClick: onPopupSignIn
+  }, "Trouble signing in? Try the popup method"));
 }
 function App() {
   const [user, setUser] = useState(null);
@@ -1143,6 +1221,18 @@ function App() {
     if (code === "auth/network-request-failed") return "Network problem reaching Google. Check your connection and try again.";
     return err && err.message ? err.message : "Sign-in failed. Please try again.";
   }
+  async function signInWithGoogleCredential(idToken) {
+    if (!window.fbAuth) return;
+    setError("");
+    setBusy(true);
+    try {
+      const cred = firebase.auth.GoogleAuthProvider.credential(idToken);
+      await window.fbAuth.signInWithCredential(cred);
+    } catch (err) {
+      setBusy(false);
+      setError(friendlyAuthError(err));
+    }
+  }
   async function signIn() {
     if (!window.fbAuth) return;
     setError("");
@@ -1157,13 +1247,21 @@ function App() {
       console.warn("Could not set persistence:", e);
     }
 
-    // Popup is the reliable path. Safari 16.1+ silently breaks signInWithRedirect
-    // when the app is hosted off the Firebase auth domain, so redirect is a fallback only.
+    // In a home-screen app the popup can never open and the promise never settles,
+    // so race it against a timer rather than hanging on "Opening Google...".
+    const stall = new Promise((_, rej) => setTimeout(() => rej({
+      code: "lw/popup-stalled"
+    }), 12000));
     try {
-      await window.fbAuth.signInWithPopup(window.fbGoogleProvider);
+      await Promise.race([window.fbAuth.signInWithPopup(window.fbGoogleProvider), stall]);
       return;
     } catch (err) {
       const code = err && err.code || "";
+      if (code === "lw/popup-stalled") {
+        setBusy(false);
+        setError("The Google window couldn't open here. Open the site in Safari and sign in there, or use the Google button above.");
+        return;
+      }
       if (code === "auth/popup-closed-by-user" || code === "auth/cancelled-popup-request") {
         setBusy(false);
         return;
@@ -1205,9 +1303,11 @@ function App() {
     }, "Loading\u2026");
   }
   if (!user) return /*#__PURE__*/React.createElement(SignInScreen, {
-    onSignIn: signIn,
+    onCredential: signInWithGoogleCredential,
+    onPopupSignIn: signIn,
     error: error,
-    busy: busy
+    busy: busy,
+    setError: setError
   });
   return /*#__PURE__*/React.createElement(LyricWriter, {
     key: uidKey,
