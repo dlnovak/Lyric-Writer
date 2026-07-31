@@ -1092,7 +1092,9 @@ function SignInScreen({
     d: "M9 4.13c1.16 0 2.21.4 3.03 1.18l2.26-2.26C12.92 1.76 11.13 1 9 1A8 8 0 0 0 1.93 5.32l2.64 2.05C5.19 5.52 6.94 4.13 9 4.13z"
   })), busy ? "Opening Google\u2026" : "Sign in with Google"), error && /*#__PURE__*/React.createElement("div", {
     className: "si-err"
-  }, error));
+  }, error), isStandalone() && !error && /*#__PURE__*/React.createElement("div", {
+    className: "si-foot"
+  }, "Signing in here is separate from Safari — this only needs doing once."));
 }
 function App() {
   const [user, setUser] = useState(null);
@@ -1106,7 +1108,15 @@ function App() {
       setAuthReady(true);
       return;
     }
-    // Returning from a redirect sign-in (iOS home-screen apps use this path)
+    try {
+      if (window.firebase && firebase.auth && firebase.auth.Auth) {
+        window.fbAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+      }
+    } catch (e) {
+      console.warn("Could not set persistence:", e);
+    }
+
+    // Catch a returning redirect sign-in (fallback path only)
     window.fbAuth.getRedirectResult().catch(err => {
       if (err && err.code !== "auth/no-auth-event") {
         setError(friendlyAuthError(err));
@@ -1137,20 +1147,27 @@ function App() {
     if (!window.fbAuth) return;
     setError("");
     setBusy(true);
-    // Popups don't work inside an iOS home-screen app — redirect instead.
-    if (isStandalone()) {
-      try {
-        await window.fbAuth.signInWithRedirect(window.fbGoogleProvider);
-      } catch (err) {
-        setBusy(false);
-        setError(friendlyAuthError(err));
+
+    // Keep the session across app relaunches (IndexedDB/localStorage, not per-tab).
+    try {
+      if (window.firebase && firebase.auth && firebase.auth.Auth) {
+        await window.fbAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
       }
-      return;
+    } catch (e) {
+      console.warn("Could not set persistence:", e);
     }
+
+    // Popup is the reliable path. Safari 16.1+ silently breaks signInWithRedirect
+    // when the app is hosted off the Firebase auth domain, so redirect is a fallback only.
     try {
       await window.fbAuth.signInWithPopup(window.fbGoogleProvider);
+      return;
     } catch (err) {
       const code = err && err.code || "";
+      if (code === "auth/popup-closed-by-user" || code === "auth/cancelled-popup-request") {
+        setBusy(false);
+        return;
+      }
       if (code === "auth/popup-blocked" || code === "auth/operation-not-supported-in-this-environment") {
         try {
           await window.fbAuth.signInWithRedirect(window.fbGoogleProvider);
