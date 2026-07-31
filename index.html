@@ -53,7 +53,7 @@
   // Google Identity Services client ID — needed for in-app sign-in on iOS.
   // Firebase Console -> Authentication -> Sign-in method -> Google
   //   -> Web SDK configuration -> Web client ID
-  window.GOOGLE_CLIENT_ID = "PASTE_WEB_CLIENT_ID_HERE";
+  window.GOOGLE_CLIENT_ID = "167307815262-6mg1uc4n7q7svf8jn85uf4evj9rhm2jc.apps.googleusercontent.com";
 
   window.FIREBASE_CONFIG = {
     apiKey: "AIzaSyDJSYw7yAnsvu_zBYh7UkdBPSlZtBxZMKg",
@@ -1021,6 +1021,10 @@ function TopicMap({
     }, "Delete")))));
   }))));
 }
+function gisConfigured() {
+  var id = window.GOOGLE_CLIENT_ID || "";
+  return !!id && id.indexOf("PASTE_") !== 0;
+}
 function isStandalone() {
   try {
     return window.navigator.standalone === true || window.matchMedia && window.matchMedia("(display-mode: standalone)").matches;
@@ -1106,6 +1110,12 @@ function SignInScreen({
           box-shadow:0 2px 8px rgba(100,60,10,.14);}
         .si-btn:disabled{opacity:.6;cursor:default;}
         .si-err{color:#a3341f;font-size:12.5px;margin-top:22px;max-width:340px;line-height:1.6;}
+        .si-setup{margin-top:26px;max-width:330px;background:#f5ecd6;border:1px solid #c4a86a;border-radius:8px;
+          padding:15px 16px;display:flex;flex-direction:column;gap:8px;text-align:left;font-size:12.5px;
+          line-height:1.6;color:#5a3a1a;}
+        .si-setup b{color:#2a160a;}
+        .si-setup-path{font-family:ui-monospace,Menlo,monospace;font-size:11.5px;background:#e8d8b0;
+          border-radius:4px;padding:6px 8px;color:#5a3a1a;}
         .si-foot{font-size:11.5px;color:#a08050;margin-top:30px;max-width:320px;line-height:1.6;}
         .si-alt{background:none;border:none;color:#8b4513;font-size:12px;text-decoration:underline;
           text-underline-offset:3px;cursor:pointer;margin-top:20px;font-family:system-ui,sans-serif;}
@@ -1181,9 +1191,13 @@ function SignInScreen({
     d: "M9 4.13c1.16 0 2.21.4 3.03 1.18l2.26-2.26C12.92 1.76 11.13 1 9 1A8 8 0 0 0 1.93 5.32l2.64 2.05C5.19 5.52 6.94 4.13 9 4.13z"
   })), busy ? "Opening Google\u2026" : "Sign in with Google"), busy && !gisFailed && /*#__PURE__*/React.createElement("div", {
     className: "si-foot"
-  }, "Signing in\\u2026"), error && /*#__PURE__*/React.createElement("div", {
+  }, "Signing in\\u2026"), error === "SETUP_NEEDED" ? /*#__PURE__*/React.createElement("div", {
+    className: "si-setup"
+  }, /*#__PURE__*/React.createElement("b", null, "Sign-in can't run inside a home-screen app yet."), /*#__PURE__*/React.createElement("span", null, "iOS blocks the Google window here. The in-page Google button fixes it, but it needs the app's ", /*#__PURE__*/React.createElement("b", null, "Web client ID"), " filled in."), /*#__PURE__*/React.createElement("span", {
+    className: "si-setup-path"
+  }, "index.html → GOOGLE_CLIENT_ID")) : error ? /*#__PURE__*/React.createElement("div", {
     className: "si-err"
-  }, error), gisReady && !busy && /*#__PURE__*/React.createElement("button", {
+  }, error) : null, gisReady && !busy && /*#__PURE__*/React.createElement("button", {
     className: "si-alt",
     onClick: onPopupSignIn
   }, "Trouble signing in? Try the popup method"));
@@ -1250,9 +1264,13 @@ function App() {
   async function signIn() {
     if (!window.fbAuth) return;
     setError("");
-    setBusy(true);
 
-    // Keep the session across app relaunches (IndexedDB/localStorage, not per-tab).
+    // A popup cannot open inside an iOS home-screen app. Don't pretend it can.
+    if (isStandalone() && !gisConfigured()) {
+      setError("SETUP_NEEDED");
+      return;
+    }
+    setBusy(true);
     try {
       if (window.firebase && firebase.auth && firebase.auth.Auth) {
         await window.fbAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
@@ -1261,34 +1279,36 @@ function App() {
       console.warn("Could not set persistence:", e);
     }
 
-    // In a home-screen app the popup can never open and the promise never settles,
-    // so race it against a timer rather than hanging on "Opening Google...".
+    // Probe whether popups work at all before handing control to Firebase.
+    let probe = null;
+    try {
+      probe = window.open("", "_blank", "width=1,height=1");
+    } catch (e) {}
+    if (!probe || probe.closed) {
+      setBusy(false);
+      setError(isStandalone() ? "SETUP_NEEDED" : "Your browser blocked the sign-in window. Allow popups for this site and try again.");
+      return;
+    }
+    try {
+      probe.close();
+    } catch (e) {}
     const stall = new Promise((_, rej) => setTimeout(() => rej({
       code: "lw/popup-stalled"
-    }), 12000));
+    }), 2500));
     try {
       await Promise.race([window.fbAuth.signInWithPopup(window.fbGoogleProvider), stall]);
       return;
     } catch (err) {
       const code = err && err.code || "";
       if (code === "lw/popup-stalled") {
+        // The popup never took focus — almost always a standalone/PWA container.
         setBusy(false);
-        setError("The Google window couldn't open here. Open the site in Safari and sign in there, or use the Google button above.");
+        setError("SETUP_NEEDED");
         return;
       }
       if (code === "auth/popup-closed-by-user" || code === "auth/cancelled-popup-request") {
         setBusy(false);
         return;
-      }
-      if (code === "auth/popup-blocked" || code === "auth/operation-not-supported-in-this-environment") {
-        try {
-          await window.fbAuth.signInWithRedirect(window.fbGoogleProvider);
-          return;
-        } catch (err2) {
-          setBusy(false);
-          setError(friendlyAuthError(err2));
-          return;
-        }
       }
       setBusy(false);
       setError(friendlyAuthError(err));
