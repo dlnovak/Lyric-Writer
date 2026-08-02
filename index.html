@@ -521,9 +521,25 @@ function countLeaves(n) {
   if (!kids.length) return 1;
   return kids.reduce((s, c) => s + countLeaves(c), 0);
 }
+
+// Rough on-screen size of a node so rings can be spaced to avoid collisions.
+function nodeSize(text, depth) {
+  const chars = String(text || "").length;
+  const fs = depth === 0 ? 21 : depth === 1 ? 16 : 15;
+  const maxW = 190;
+  const padX = depth === 0 ? 60 : 34;
+  const oneLine = chars * fs * 0.58 + padX;
+  const w = Math.min(maxW, oneLine);
+  const lines = Math.max(1, Math.ceil(oneLine / maxW));
+  const h = lines * fs * 1.35 + 20;
+  return {
+    w,
+    h
+  };
+}
 function buildLayout(rootChildren, rootLabel) {
   const out = [];
-  const rootEntry = {
+  out.push({
     node: {
       id: "__root",
       text: rootLabel,
@@ -535,44 +551,73 @@ function buildLayout(rootChildren, rootLabel) {
     parentPos: null,
     ids: [],
     isRoot: true
-  };
-  out.push(rootEntry);
+  });
+
+  // First pass: assign each node an angular slice.
+  const slices = [];
   const total = rootChildren.reduce((s, c) => s + countLeaves(c), 0) || 1;
-  const startAngle = -Math.PI / 2;
-  let cursor = startAngle;
-  const walk = (node, depth, a0, a1, parentPos, ids) => {
+  let cursor = -Math.PI / 2;
+  const assign = (node, depth, a0, a1, ids) => {
     const angle = (a0 + a1) / 2;
-    const r = depth === 1 ? 195 : 195 + (depth - 1) * 155;
-    const pos = {
-      x: Math.cos(angle) * r,
-      y: Math.sin(angle) * r
-    };
-    out.push({
+    slices.push({
       node,
       depth,
-      ...pos,
-      parentPos,
-      ids,
-      angle
+      angle,
+      a0,
+      a1,
+      ids
     });
     const kids = node.children || [];
     if (!kids.length) return;
     const kidTotal = kids.reduce((s, c) => s + countLeaves(c), 0) || 1;
-    let span = Math.min(a1 - a0, Math.PI * 0.8);
+    // Deeper rings fan out inside a narrower wedge so branches stay legible.
+    const span = Math.min(a1 - a0, Math.PI * 0.85);
     let c2 = angle - span / 2;
     for (const c of kids) {
       const share = countLeaves(c) / kidTotal * span;
-      walk(c, depth + 1, c2, c2 + share, pos, [...ids, node.id]);
+      assign(c, depth + 1, c2, c2 + share, [...ids, node.id]);
       c2 += share;
     }
   };
   for (const c of rootChildren) {
     const share = countLeaves(c) / total * Math.PI * 2;
-    walk(c, 1, cursor, cursor + share, {
-      x: 0,
-      y: 0
-    }, []);
+    assign(c, 1, cursor, cursor + share, []);
     cursor += share;
+  }
+
+  // Second pass: pick each ring's radius from how much room its nodes need.
+  const maxDepth = slices.reduce((m, s) => Math.max(m, s.depth), 0);
+  const radii = {
+    0: 0
+  };
+  const GAP = 26;
+  for (let d = 1; d <= maxDepth; d++) {
+    const ring = slices.filter(s => s.depth === d);
+    // Widest node on this ring drives the minimum step out from the previous ring.
+    const tallest = ring.reduce((m, s) => Math.max(m, nodeSize(s.node.text, d).h), 0);
+    const step = (d === 1 ? 150 : 130) + tallest * 0.5;
+    // Enough circumference that neighbours don't touch.
+    const needed = ring.reduce((sum, s) => sum + nodeSize(s.node.text, d).w + GAP, 0);
+    const byCircumference = needed / (2 * Math.PI);
+    radii[d] = Math.max(radii[d - 1] + step, byCircumference);
+  }
+  for (const sl of slices) {
+    const r = radii[sl.depth];
+    const parent = slices.find(x => x.node.id === sl.ids[sl.ids.length - 1]);
+    const pr = parent ? radii[parent.depth] : 0;
+    const pa = parent ? parent.angle : 0;
+    out.push({
+      node: sl.node,
+      depth: sl.depth,
+      ids: sl.ids,
+      angle: sl.angle,
+      x: Math.cos(sl.angle) * r,
+      y: Math.sin(sl.angle) * r,
+      parentPos: {
+        x: Math.cos(pa) * pr,
+        y: Math.sin(pa) * pr
+      }
+    });
   }
   return out;
 }
@@ -598,8 +643,7 @@ function TopicsPage({
   function addTopic() {
     const val = newName.trim();
     if (!val) return;
-    const tp = makeTopic(val);
-    setTopics(prev => [...prev, tp]);
+    setTopics(prev => [...prev, makeTopic(val)]);
     setNewName("");
   }
   function renameTopic(id) {
@@ -620,33 +664,47 @@ function TopicsPage({
   return /*#__PURE__*/React.createElement("div", {
     className: "tp-overlay"
   }, /*#__PURE__*/React.createElement("style", null, `
-        .tp-overlay{position:fixed;inset:0;z-index:200;background:${t.bg};display:flex;flex-direction:column;font-family:system-ui,sans-serif;overflow-y:auto;}
-        .tp-bar{background:${t.toolbar};border-bottom:1px solid ${t.border};padding:9px 14px;display:flex;align-items:center;gap:8px;flex-shrink:0;height:52px;position:sticky;top:0;z-index:5;}
+        .tp-overlay{position:fixed;inset:0;z-index:200;background:${t.bg};display:flex;flex-direction:column;
+          font-family:system-ui,sans-serif;overflow-y:auto;
+          padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom);
+          padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right);}
+        .tp-bar{background:${t.toolbar};border-bottom:1px solid ${t.border};padding:9px 14px;display:flex;
+          align-items:center;gap:8px;flex-shrink:0;min-height:52px;position:sticky;top:0;z-index:5;}
         .tp-bar-title{font-size:12px;letter-spacing:.13em;text-transform:uppercase;color:${t.muted};font-weight:700;}
-        .tp-close{background:${t.accent};border:none;color:${t.accentText};padding:0 15px;height:30px;font-size:12px;font-weight:700;border-radius:5px;cursor:pointer;margin-left:auto;white-space:nowrap;}
-        .tp-inner{max-width:620px;width:100%;margin:0 auto;padding:34px 20px 70px;}
+        .tp-close{background:${t.accent};border:none;color:${t.accentText};padding:0 15px;height:30px;
+          font-size:12px;font-weight:700;border-radius:5px;cursor:pointer;margin-left:auto;white-space:nowrap;}
+        .tp-inner{max-width:620px;width:100%;margin:0 auto;padding:30px 20px 70px;}
         .tp-sub{font-size:14px;color:${t.muted};margin-bottom:26px;line-height:1.65;}
         .tp-addrow{display:flex;gap:8px;margin-bottom:30px;}
-        .tp-input{flex:1;background:${t.surface};border:1px solid ${t.border};color:${t.text};padding:12px 14px;font-size:15px;border-radius:6px;outline:none;font-family:${font};min-width:0;}
+        .tp-input{flex:1;background:${t.surface};border:1px solid ${t.border};color:${t.text};padding:12px 14px;
+          font-size:15px;border-radius:6px;outline:none;font-family:${font};min-width:0;}
         .tp-input:focus{border-color:${t.accent};}
         .tp-input::placeholder{color:${t.titlePlaceholder};font-family:system-ui,sans-serif;font-size:14px;}
-        .tp-add{background:${t.accent};border:none;color:${t.accentText};padding:0 20px;font-size:14px;font-weight:700;border-radius:6px;cursor:pointer;white-space:nowrap;}
-        .tp-label{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:${t.muted};font-weight:700;margin-bottom:12px;}
-        .tp-card{background:${t.surface};border:1px solid ${t.border};border-radius:8px;padding:16px;margin-bottom:10px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;cursor:pointer;transition:border-color .15s,box-shadow .15s,transform .12s;}
-        .tp-card:hover{border-color:${t.accent};box-shadow:0 3px 14px rgba(0,0,0,.09);transform:translateY(-1px);}
-        .tp-card-main{flex:1;min-width:0;}
+        .tp-add{background:${t.accent};border:none;color:${t.accentText};padding:0 20px;font-size:14px;
+          font-weight:700;border-radius:6px;cursor:pointer;white-space:nowrap;}
+        .tp-label{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:${t.muted};
+          font-weight:700;margin-bottom:12px;}
+        .tp-card{background:${t.surface};border:1px solid ${t.border};border-radius:8px;padding:16px;
+          margin-bottom:10px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;cursor:pointer;
+          transition:border-color .15s,box-shadow .15s,transform .12s;}
+        .tp-card:hover{border-color:${t.accent};box-shadow:0 3px 14px rgba(0,0,0,.18);transform:translateY(-1px);}
+        .tp-card-main{flex:1;min-width:120px;}
         .tp-card-name{font-family:${font};font-size:19px;color:${t.text};line-height:1.3;word-break:break-word;}
         .tp-card-meta{font-size:11px;color:${t.muted};margin-top:4px;}
         .tp-card-acts{display:flex;align-items:center;gap:10px;flex-shrink:0;}
         .tp-mini{display:flex;gap:2px;}
-        .tp-open{background:${t.accent};border:none;color:${t.accentText};padding:8px 14px;font-size:12px;font-weight:700;border-radius:5px;cursor:pointer;white-space:nowrap;}
+        .tp-open{background:${t.accent};border:none;color:${t.accentText};padding:8px 14px;font-size:12px;
+          font-weight:700;border-radius:5px;cursor:pointer;white-space:nowrap;}
         .tp-open:hover{opacity:.88;}
-        .tp-icon{background:transparent;border:1px solid transparent;color:${t.muted};cursor:pointer;font-size:12px;padding:5px 8px;border-radius:4px;}
+        .tp-icon{background:transparent;border:1px solid transparent;color:${t.muted};cursor:pointer;
+          font-size:12px;padding:5px 8px;border-radius:4px;}
         .tp-icon:hover{border-color:${t.border};color:${t.text};}
         .tp-icon.danger:hover{background:#e53935;border-color:#e53935;color:#fff;}
         .tp-editrow{display:flex;gap:6px;flex:1;}
-        .tp-editinput{flex:1;background:${t.bg};border:1px solid ${t.accent};color:${t.text};padding:8px 10px;font-size:15px;border-radius:5px;outline:none;font-family:${font};min-width:0;}
-        .tp-empty{border:1px dashed ${t.border};border-radius:8px;padding:36px 22px;text-align:center;color:${t.muted};font-size:13px;line-height:1.75;}
+        .tp-editinput{flex:1;background:${t.bg};border:1px solid ${t.accent};color:${t.text};padding:8px 10px;
+          font-size:15px;border-radius:5px;outline:none;font-family:${font};min-width:0;}
+        .tp-empty{border:1px dashed ${t.border};border-radius:8px;padding:36px 22px;text-align:center;
+          color:${t.muted};font-size:13px;line-height:1.75;}
       `), /*#__PURE__*/React.createElement("div", {
     className: "tp-bar"
   }, /*#__PURE__*/React.createElement("span", {
@@ -737,13 +795,14 @@ function TopicMap({
   onInsert,
   phrases,
   onSavePhrase,
-  backLabel = "Topics"
+  backLabel = "Topics",
+  embedded = false
 }) {
   const [offset, setOffset] = useState({
     x: 0,
     y: 0
   });
-  const [zoom, setZoom] = useState(1);
+  const [zoom, setZoom] = useState(embedded ? 0.62 : 1);
   const [activeId, setActiveId] = useState(null);
   const [inputVal, setInputVal] = useState("");
   const [renaming, setRenaming] = useState(false);
@@ -752,6 +811,31 @@ function TopicMap({
   const [savedFlash, setSavedFlash] = useState(false);
   const dragRef = useRef(null);
   const movedRef = useRef(false);
+  const stageRef = useRef(null);
+  const viewRef = useRef({
+    x: 0,
+    y: 0,
+    z: embedded ? 0.62 : 1
+  });
+  const rafRef = useRef(null);
+  useEffect(() => {
+    viewRef.current = {
+      x: offset.x,
+      y: offset.y,
+      z: zoom
+    };
+  }, [offset.x, offset.y, zoom]);
+  function paint() {
+    rafRef.current = null;
+    const el = stageRef.current;
+    if (!el) return;
+    const v = viewRef.current;
+    el.style.transform = `translate3d(${v.x}px, ${v.y}px, 0) scale(${v.z})`;
+  }
+  function schedulePaint() {
+    if (rafRef.current) return;
+    rafRef.current = requestAnimationFrame(paint);
+  }
   const rootChildren = root || [];
   const layout = buildLayout(rootChildren, topicName || "Topic");
   const active = layout.find(l => l.node.id === activeId) || null;
@@ -796,8 +880,8 @@ function TopicMap({
     dragRef.current = {
       sx: cx,
       sy: cy,
-      ox: offset.x,
-      oy: offset.y
+      ox: viewRef.current.x,
+      oy: viewRef.current.y
     };
     movedRef.current = false;
   }
@@ -805,24 +889,40 @@ function TopicMap({
     const d = dragRef.current;
     if (!d) return;
     if (Math.abs(cx - d.sx) > 3 || Math.abs(cy - d.sy) > 3) movedRef.current = true;
-    setOffset({
-      x: d.ox + (cx - d.sx),
-      y: d.oy + (cy - d.sy)
-    });
+    viewRef.current.x = d.ox + (cx - d.sx);
+    viewRef.current.y = d.oy + (cy - d.sy);
+    schedulePaint();
   }
   function endDrag() {
-    if (dragRef.current && !movedRef.current) setActiveId(null);
+    if (dragRef.current) {
+      if (!movedRef.current) setActiveId(null);
+      // Commit the panned position back to React once, on release.
+      setOffset({
+        x: viewRef.current.x,
+        y: viewRef.current.y
+      });
+    }
     dragRef.current = null;
   }
   function onWheel(e) {
-    setZoom(z => Math.min(2.2, Math.max(0.3, z - e.deltaY * 0.0012)));
+    const z = Math.min(2.2, Math.max(0.3, viewRef.current.z - e.deltaY * 0.0012));
+    viewRef.current.z = z;
+    schedulePaint();
+    clearTimeout(rafRef.zoomCommit);
+    rafRef.zoomCommit = setTimeout(() => setZoom(z), 120);
   }
   const hasNodes = rootChildren.length > 0;
   return /*#__PURE__*/React.createElement("div", {
-    className: "tm-overlay"
+    className: embedded ? "tm-overlay tm-embedded" : "tm-overlay"
   }, /*#__PURE__*/React.createElement("style", null, `
-        .tm-overlay{position:fixed;inset:0;z-index:200;background:${t.bg};display:flex;flex-direction:column;font-family:system-ui,sans-serif;}
-        .tm-bar{background:${t.toolbar};border-bottom:1px solid ${t.border};padding:9px 14px;display:flex;align-items:center;gap:7px;flex-shrink:0;height:52px;}
+        .tm-overlay{position:fixed;inset:0;z-index:200;background:${t.bg};display:flex;flex-direction:column;
+          font-family:system-ui,sans-serif;
+          padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom);
+          padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right);}
+        .tm-embedded{position:absolute;inset:0;z-index:1;padding:0;background:transparent;}
+        .tm-embedded .tm-bar{display:none;}
+        .tm-bar{background:${t.toolbar};border-bottom:1px solid ${t.border};padding:9px 12px;display:flex;
+          align-items:center;gap:7px;flex-shrink:0;min-height:52px;position:relative;z-index:3;}
         .tm-heading{font-family:${font};font-size:17px;color:${t.text};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:34%;}
         .tm-spacer{flex:1;}
         .tm-zoom{display:flex;gap:4px;}
@@ -832,10 +932,13 @@ function TopicMap({
         .tm-close{background:${t.accent};border:none;color:${t.accentText};padding:0 15px;height:30px;font-size:12px;font-weight:700;border-radius:5px;cursor:pointer;white-space:nowrap;}
         .tm-canvas{flex:1;overflow:hidden;position:relative;cursor:grab;touch-action:none;background:radial-gradient(circle at 50% 46%, ${t.surface}55, transparent 62%);}
         .tm-canvas:active{cursor:grabbing;}
-        .tm-stage{position:absolute;left:50%;top:46%;transform-origin:0 0;}
+        .tm-stage{position:absolute;left:50%;top:46%;transform-origin:0 0;will-change:transform;}
         .tm-links{position:absolute;left:0;top:0;overflow:visible;pointer-events:none;}
         .tm-nodewrap{position:absolute;width:0;height:0;}
-        .tm-node{position:absolute;left:0;top:0;transform:translate(-50%,-50%);cursor:pointer;user-select:none;width:max-content;max-width:200px;text-align:center;line-height:1.35;transition:box-shadow .18s,transform .18s,border-color .18s;overflow-wrap:break-word;}
+        .tm-node{position:absolute;left:0;top:0;transform:translate(-50%,-50%);cursor:pointer;user-select:none;
+          width:max-content;max-width:190px;text-align:center;line-height:1.35;
+          transition:box-shadow .18s,border-color .18s;overflow-wrap:break-word;
+          will-change:transform;}
         .tm-root{background:${t.accent};color:${t.accentText};font-family:${font};font-size:21px;padding:15px 30px;border-radius:30px;border:none;box-shadow:0 5px 22px ${t.accent}44;letter-spacing:.01em;}
         .tm-root:hover{transform:translate(-50%,-50%) scale(1.04);}
         .tm-branch{background:${t.surface};color:${t.text};border:1.5px solid ${t.accent}bb;font-family:${font};font-size:16px;padding:9px 18px;border-radius:18px;box-shadow:0 2px 10px rgba(0,0,0,.07);}
@@ -865,7 +968,7 @@ function TopicMap({
         @media (max-width: 620px){
           .tm-heading{max-width:44%;font-size:16px;}
         }
-      `), /*#__PURE__*/React.createElement("div", {
+      `), !embedded && /*#__PURE__*/React.createElement("div", {
     className: "tm-bar"
   }, /*#__PURE__*/React.createElement("button", {
     className: "tm-bar-btn wide",
@@ -909,8 +1012,9 @@ function TopicMap({
     onWheel: onWheel
   }, /*#__PURE__*/React.createElement("div", {
     className: "tm-stage",
+    ref: stageRef,
     style: {
-      transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})`
+      transform: `translate3d(${offset.x}px, ${offset.y}px, 0) scale(${zoom})`
     }
   }, /*#__PURE__*/React.createElement("svg", {
     className: "tm-links",
@@ -1384,6 +1488,17 @@ function LyricWriter({
   const [rhymeResults, setRhymeResults] = useState([]);
   const [rhymeLoading, setRhymeLoading] = useState(false);
   const [rhymeError, setRhymeError] = useState("");
+  const [defWord, setDefWord] = useState("");
+  const [defs, setDefs] = useState([]);
+  const [defLoading, setDefLoading] = useState(false);
+  const [defError, setDefError] = useState("");
+  const [thWord, setThWord] = useState("");
+  const [thSyn, setThSyn] = useState([]);
+  const [thAnt, setThAnt] = useState([]);
+  const [thLoading, setThLoading] = useState(false);
+  const [thError, setThError] = useState("");
+  const [rightOpen, setRightOpen] = useState(true);
+  const [rightTopicId, setRightTopicId] = useState(null);
   const [phrases, setPhrases] = useState([]);
   const [phraseInput, setPhraseInput] = useState("");
   const [phraseError, setPhraseError] = useState("");
@@ -1396,6 +1511,7 @@ function LyricWriter({
   const paperWidth = (WIDTHS[pageWidth] || WIDTHS.medium).value;
   const activeTopic = topics.find(tp => tp.id === activeTopicId) || null;
   const activePhrase = phrases.find(p => p.key === activePhraseKey) || null;
+  const rightTopic = topics.find(tp => tp.id === rightTopicId) || null;
   useEffect(() => {
     refreshList();
     loadPhrases();
@@ -1604,6 +1720,88 @@ function LyricWriter({
       setRhymeLoading(false);
     }
   }
+  const POS = {
+    n: "noun",
+    v: "verb",
+    adj: "adjective",
+    adv: "adverb",
+    u: ""
+  };
+  async function lookupDefinition(word) {
+    const w = (word || "").trim();
+    if (!w) return;
+    setDefLoading(true);
+    setDefError("");
+    setDefs([]);
+    try {
+      const res = await fetch(`https://api.datamuse.com/words?sp=${encodeURIComponent(w)}&md=dp&max=1`);
+      if (!res.ok) throw new Error("lookup failed");
+      const data = await res.json();
+      const entry = data && data[0];
+      if (!entry || !entry.defs || !entry.defs.length) {
+        setDefError(`No entry found for "${w}".`);
+      } else {
+        setDefs(entry.defs.map(d => {
+          const i = d.indexOf("\t");
+          const tag = i > 0 ? d.slice(0, i) : "";
+          const text = i > 0 ? d.slice(i + 1) : d;
+          return {
+            pos: POS[tag] !== undefined ? POS[tag] : tag,
+            text
+          };
+        }));
+      }
+    } catch (e) {
+      setDefError("Couldn't reach the dictionary. Check your connection.");
+    } finally {
+      setDefLoading(false);
+    }
+  }
+  async function lookupThesaurus(word) {
+    const w = (word || "").trim();
+    if (!w) return;
+    setThLoading(true);
+    setThError("");
+    setThSyn([]);
+    setThAnt([]);
+    try {
+      const [sRes, aRes] = await Promise.all([fetch(`https://api.datamuse.com/words?rel_syn=${encodeURIComponent(w)}&max=60`), fetch(`https://api.datamuse.com/words?rel_ant=${encodeURIComponent(w)}&max=30`)]);
+      const syn = sRes.ok ? await sRes.json() : [];
+      const ant = aRes.ok ? await aRes.json() : [];
+      let list = syn.map(d => d.word);
+      if (!list.length) {
+        // fall back to "means like" when there are no strict synonyms
+        const mlRes = await fetch(`https://api.datamuse.com/words?ml=${encodeURIComponent(w)}&max=60`);
+        if (mlRes.ok) list = (await mlRes.json()).map(d => d.word);
+      }
+      setThSyn(list);
+      setThAnt(ant.map(d => d.word));
+      if (!list.length && !ant.length) setThError(`Nothing found for "${w}".`);
+    } catch (e) {
+      setThError("Couldn't reach the thesaurus. Check your connection.");
+    } finally {
+      setThLoading(false);
+    }
+  }
+
+  // Look the selected/last word up in whichever tool is showing
+  function useSelectionFor(kind) {
+    const sel = getSelectedText();
+    const word = (sel.split(/\s+/).pop() || "").replace(/[^A-Za-z'-]/g, "");
+    if (!word) return;
+    if (kind === "rhyme") {
+      setRhymeWord(word);
+      lookupRhymes(word, rhymeMode);
+    }
+    if (kind === "define") {
+      setDefWord(word);
+      lookupDefinition(word);
+    }
+    if (kind === "thesaurus") {
+      setThWord(word);
+      lookupThesaurus(word);
+    }
+  }
   function useSelectionForRhyme() {
     const sel = getSelectedText();
     const word = sel.split(/\s+/).pop() || "";
@@ -1726,7 +1924,28 @@ function LyricWriter({
         .lw-signout-btn{background:transparent;border:1px solid ${t.border};color:${t.text};padding:5px 10px;cursor:pointer;font-size:12px;border-radius:4px;width:100%;}
         .lw-signout-btn:hover{background:${t.border};}
 
-        .lw-main{display:flex;flex:1;min-height:0;align-items:flex-start;}
+        .lw-main{display:flex;flex:1;min-height:0;align-items:stretch;}
+        .lw-side{width:330px;flex-shrink:0;background:${t.toolbar};display:flex;flex-direction:column;
+          position:sticky;top:0;height:calc(100vh - 50px);}
+        .lw-side.left{border-right:1px solid ${t.border};}
+        .lw-side.right{border-left:1px solid ${t.border};width:420px;}
+        .lw-rail{width:34px;flex-shrink:0;background:${t.toolbar};border-left:1px solid ${t.border};
+          display:flex;align-items:flex-start;justify-content:center;padding-top:12px;position:sticky;top:0;
+          height:calc(100vh - 50px);}
+        .rail-btn{writing-mode:vertical-rl;background:transparent;border:none;color:${t.muted};cursor:pointer;
+          font-size:11px;letter-spacing:.14em;text-transform:uppercase;padding:8px 4px;font-weight:600;}
+        .rail-btn:hover{color:${t.text};}
+        .map-mini{flex:1;position:relative;overflow:hidden;min-height:0;}
+        .map-mini-head{padding:9px 12px;border-bottom:1px solid ${t.border};display:flex;align-items:center;gap:8px;}
+        .map-mini-sel{flex:1;background:${t.surface};border:1px solid ${t.border};color:${t.text};
+          padding:5px 8px;font-size:12px;border-radius:4px;outline:none;min-width:0;}
+        .map-mini-empty{padding:38px 22px;text-align:center;color:${t.muted};font-size:12.5px;line-height:1.7;}
+        @media (max-width: 1100px){
+          .lw-side.right,.lw-rail{display:none;}
+        }
+        @media (max-width: 820px){
+          .lw-side.left{display:none;}
+        }
         .lw-body{display:flex;flex-direction:column;align-items:center;padding:32px 20px 60px;flex:1;min-width:0;}
         .lw-title-wrap{width:100%;max-width:${paperWidth};}
         .lw-title{background:transparent;border:none;border-bottom:1px solid ${t.border};color:${t.text};font-family:${font};font-size:26px;font-weight:bold;width:100%;padding:6px 2px 10px;outline:none;text-align:${align};text-shadow:${textShadow};}
@@ -1747,7 +1966,7 @@ function LyricWriter({
         .lw-dot{width:6px;height:6px;border-radius:50%;background:${t.accent};display:inline-block;animation:lwpulse 1s ease-in-out infinite;}
         @keyframes lwpulse{0%,100%{opacity:.25;}50%{opacity:1;}}
 
-        .lw-panel{width:320px;flex-shrink:0;background:${t.toolbar};border-left:1px solid ${t.border};display:flex;flex-direction:column;position:sticky;top:49px;height:calc(100vh - 49px);}
+        .lw-panel{display:flex;flex-direction:column;flex:1;min-height:0;}
         .panel-tabs{display:flex;border-bottom:1px solid ${t.border};align-items:center;}
         .panel-tab{flex:1;padding:10px 4px;background:transparent;border:none;border-bottom:2px solid transparent;color:${t.muted};font-size:11px;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;font-weight:600;}
         .panel-tab:hover{color:${t.text};}
@@ -1793,13 +2012,22 @@ function LyricWriter({
         .branch-title{font-family:${font};font-size:19px;color:${t.text};line-height:1.35;margin-bottom:9px;word-break:break-word;}
         .branch-actions{display:flex;gap:6px;}
         .panel-note{font-size:11px;color:${t.muted};line-height:1.5;}
+        .def-item{border-left:2px solid ${t.accent};padding:2px 0 2px 11px;margin-bottom:13px;}
+        .def-pos{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:${t.accent};
+          font-weight:700;margin-bottom:3px;}
+        .def-text{font-size:13.5px;line-height:1.6;color:${t.text};}
+        .th-head{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:${t.muted};
+          font-weight:700;margin:14px 0 7px;}
         .panel-empty{font-size:12px;color:${t.muted};line-height:1.6;padding:14px 0;}
         .small-btn{background:transparent;border:1px solid ${t.border};color:${t.text};padding:6px 10px;font-size:11px;border-radius:4px;cursor:pointer;white-space:nowrap;}
         .small-btn:hover{background:${t.border};}
         .go-btn{background:${t.accent};border:none;color:${t.accentText};padding:7px 12px;font-size:12px;border-radius:4px;cursor:pointer;font-weight:600;}
 
         .lw-drawer-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:100;}
-        .lw-drawer{position:fixed;top:0;right:0;width:300px;height:100vh;background:${t.toolbar};border-left:1px solid ${t.border};z-index:101;display:flex;flex-direction:column;box-shadow:-4px 0 24px rgba(0,0,0,.4);}
+        .lw-drawer{position:fixed;top:0;right:0;width:300px;height:100vh;background:${t.toolbar};
+          border-left:1px solid ${t.border};z-index:101;display:flex;flex-direction:column;
+          box-shadow:-4px 0 24px rgba(0,0,0,.4);
+          padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom);}
         .lw-drawer-head{padding:16px 16px 12px;border-bottom:1px solid ${t.border};display:flex;align-items:center;justify-content:space-between;}
         .lw-drawer-title{font-size:13px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:${t.text};}
         .lw-drawer-list{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:6px;}
@@ -1876,6 +2104,12 @@ function LyricWriter({
     className: `tb-btn ${panelTab === "rhyme" ? "on" : ""}`,
     onClick: () => setPanelTab(panelTab === "rhyme" ? null : "rhyme")
   }, "Rhymes"), /*#__PURE__*/React.createElement("button", {
+    className: `tb-btn ${panelTab === "define" ? "on" : ""}`,
+    onClick: () => setPanelTab(panelTab === "define" ? null : "define")
+  }, "Define"), /*#__PURE__*/React.createElement("button", {
+    className: `tb-btn ${panelTab === "thesaurus" ? "on" : ""}`,
+    onClick: () => setPanelTab(panelTab === "thesaurus" ? null : "thesaurus")
+  }, "Thesaurus"), /*#__PURE__*/React.createElement("button", {
     className: `tb-btn ${panelTab === "phrases" ? "on" : ""}`,
     onClick: () => setPanelTab(panelTab === "phrases" ? null : "phrases")
   }, "Phrases"), /*#__PURE__*/React.createElement("button", {
@@ -1925,41 +2159,22 @@ function LyricWriter({
     onClick: onSignOut
   }, "Sign out")))), /*#__PURE__*/React.createElement("div", {
     className: "lw-main"
+  }, panelOpen && /*#__PURE__*/React.createElement("div", {
+    className: "lw-side left"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "lw-body"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "lw-title-wrap"
-  }, /*#__PURE__*/React.createElement("input", {
-    className: "lw-title",
-    value: title,
-    onChange: e => setTitle(e.target.value),
-    placeholder: "Song title..."
-  })), /*#__PURE__*/React.createElement("div", {
-    className: "lw-paper"
-  }, /*#__PURE__*/React.createElement("textarea", {
-    ref: textRef,
-    className: "lw-textarea",
-    value: content,
-    onChange: e => setContent(e.target.value),
-    spellCheck: false
-  })), /*#__PURE__*/React.createElement("div", {
-    className: "lw-meta"
-  }, /*#__PURE__*/React.createElement("span", null, wordCount, " words"), /*#__PURE__*/React.createElement("span", null, lineCount, " lines"), saveLabel && /*#__PURE__*/React.createElement("span", {
-    className: "lw-savestate" + (saveState === "error" ? " err" : "")
-  }, saveState === "saving" && /*#__PURE__*/React.createElement("span", {
-    className: "lw-dot"
-  }), saveLabel), /*#__PURE__*/React.createElement("span", {
-    style: {
-      marginLeft: "auto"
-    }
-  }, t.name))), panelOpen && /*#__PURE__*/React.createElement("div", {
     className: "lw-panel"
   }, /*#__PURE__*/React.createElement("div", {
     className: "panel-tabs"
   }, /*#__PURE__*/React.createElement("button", {
     className: `panel-tab ${panelTab === "rhyme" ? "active" : ""}`,
     onClick: () => setPanelTab("rhyme")
-  }, "Rhymes"), /*#__PURE__*/React.createElement("button", {
+  }, "Rhyme"), /*#__PURE__*/React.createElement("button", {
+    className: `panel-tab ${panelTab === "define" ? "active" : ""}`,
+    onClick: () => setPanelTab("define")
+  }, "Define"), /*#__PURE__*/React.createElement("button", {
+    className: `panel-tab ${panelTab === "thesaurus" ? "active" : ""}`,
+    onClick: () => setPanelTab("thesaurus")
+  }, "Syn"), /*#__PURE__*/React.createElement("button", {
     className: `panel-tab ${panelTab === "phrases" ? "active" : ""}`,
     onClick: () => setPanelTab("phrases")
   }, "Phrases"), /*#__PURE__*/React.createElement("button", {
@@ -2012,7 +2227,99 @@ function LyricWriter({
     onClick: () => insertAtCursor(w)
   }, w)))), !rhymeLoading && !rhymeError && rhymeResults.length === 0 && /*#__PURE__*/React.createElement("div", {
     className: "panel-empty"
-  }, "Straight dictionary lookup. Results come from a rhyming database — nothing is generated.")), panelTab === "phrases" && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+  }, "Straight dictionary lookup. Results come from a rhyming database — nothing is generated.")), panelTab === "define" && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "panel-label"
+  }, "Look up a word"), /*#__PURE__*/React.createElement("div", {
+    className: "panel-row"
+  }, /*#__PURE__*/React.createElement("input", {
+    className: "panel-input",
+    value: defWord,
+    onChange: e => setDefWord(e.target.value),
+    onKeyDown: e => {
+      if (e.key === "Enter") lookupDefinition(defWord);
+    },
+    placeholder: "e.g. temperature"
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "go-btn",
+    onClick: () => lookupDefinition(defWord)
+  }, "Go")), /*#__PURE__*/React.createElement("button", {
+    className: "small-btn",
+    style: {
+      width: "100%",
+      marginBottom: 14
+    },
+    onClick: () => useSelectionFor("define")
+  }, "Use word selected in lyrics"), defLoading && /*#__PURE__*/React.createElement("div", {
+    className: "panel-empty"
+  }, "Looking up…"), defError && /*#__PURE__*/React.createElement("div", {
+    className: "panel-empty"
+  }, defError), !defLoading && defs.length > 0 && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "panel-label"
+  }, defWord), defs.map((d, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    className: "def-item"
+  }, d.pos && /*#__PURE__*/React.createElement("div", {
+    className: "def-pos"
+  }, d.pos), /*#__PURE__*/React.createElement("div", {
+    className: "def-text"
+  }, d.text))), /*#__PURE__*/React.createElement("button", {
+    className: "small-btn",
+    style: {
+      width: "100%",
+      marginTop: 4
+    },
+    onClick: () => {
+      setThWord(defWord);
+      setPanelTab("thesaurus");
+      lookupThesaurus(defWord);
+    }
+  }, "Synonyms for \"", defWord, "\"")), !defLoading && !defError && defs.length === 0 && /*#__PURE__*/React.createElement("div", {
+    className: "panel-empty"
+  }, "Definitions come from a word database — nothing is written or invented.")), panelTab === "thesaurus" && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "panel-label"
+  }, "Find another word"), /*#__PURE__*/React.createElement("div", {
+    className: "panel-row"
+  }, /*#__PURE__*/React.createElement("input", {
+    className: "panel-input",
+    value: thWord,
+    onChange: e => setThWord(e.target.value),
+    onKeyDown: e => {
+      if (e.key === "Enter") lookupThesaurus(thWord);
+    },
+    placeholder: "e.g. toxic"
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "go-btn",
+    onClick: () => lookupThesaurus(thWord)
+  }, "Go")), /*#__PURE__*/React.createElement("button", {
+    className: "small-btn",
+    style: {
+      width: "100%",
+      marginBottom: 10
+    },
+    onClick: () => useSelectionFor("thesaurus")
+  }, "Use word selected in lyrics"), thLoading && /*#__PURE__*/React.createElement("div", {
+    className: "panel-empty"
+  }, "Looking up…"), thError && /*#__PURE__*/React.createElement("div", {
+    className: "panel-empty"
+  }, thError), !thLoading && thSyn.length > 0 && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "th-head"
+  }, "Similar (", thSyn.length, ") — click to insert"), /*#__PURE__*/React.createElement("div", {
+    className: "chip-wrap"
+  }, thSyn.map((wd, i) => /*#__PURE__*/React.createElement("button", {
+    key: i,
+    className: "chip",
+    onClick: () => insertAtCursor(wd)
+  }, wd)))), !thLoading && thAnt.length > 0 && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "th-head"
+  }, "Opposite (", thAnt.length, ")"), /*#__PURE__*/React.createElement("div", {
+    className: "chip-wrap"
+  }, thAnt.map((wd, i) => /*#__PURE__*/React.createElement("button", {
+    key: i,
+    className: "chip",
+    onClick: () => insertAtCursor(wd)
+  }, wd)))), !thLoading && !thError && !thSyn.length && !thAnt.length && /*#__PURE__*/React.createElement("div", {
+    className: "panel-empty"
+  }, "Synonyms and antonyms from a word database. Your words stay yours.")), panelTab === "phrases" && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     className: "panel-label"
   }, "Save a phrase"), /*#__PURE__*/React.createElement("div", {
     className: "panel-row"
@@ -2062,7 +2369,77 @@ function LyricWriter({
   }, countAllNodes(p.root) === 0 ? "no map yet" : `${countAllNodes(p.root)} mapped`), /*#__PURE__*/React.createElement("button", {
     className: "phrase-map-btn",
     onClick: () => setActivePhraseKey(p.key)
-  }, "Open map ›"))))))))), topicsOpen && activeTopicId === null && /*#__PURE__*/React.createElement(TopicsPage, {
+  }, "Open map ›")))))))), /*#__PURE__*/React.createElement("div", {
+    className: "lw-body"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "lw-title-wrap"
+  }, /*#__PURE__*/React.createElement("input", {
+    className: "lw-title",
+    value: title,
+    onChange: e => setTitle(e.target.value),
+    placeholder: "Song title..."
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "lw-paper"
+  }, /*#__PURE__*/React.createElement("textarea", {
+    ref: textRef,
+    className: "lw-textarea",
+    value: content,
+    onChange: e => setContent(e.target.value),
+    spellCheck: false
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "lw-meta"
+  }, /*#__PURE__*/React.createElement("span", null, wordCount, " words"), /*#__PURE__*/React.createElement("span", null, lineCount, " lines"), saveLabel && /*#__PURE__*/React.createElement("span", {
+    className: "lw-savestate" + (saveState === "error" ? " err" : "")
+  }, saveState === "saving" && /*#__PURE__*/React.createElement("span", {
+    className: "lw-dot"
+  }), saveLabel), /*#__PURE__*/React.createElement("span", {
+    style: {
+      marginLeft: "auto"
+    }
+  }, t.name))), rightOpen ? /*#__PURE__*/React.createElement("div", {
+    className: "lw-side right"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "map-mini-head"
+  }, /*#__PURE__*/React.createElement("select", {
+    className: "map-mini-sel",
+    value: rightTopicId || "",
+    onChange: e => setRightTopicId(e.target.value || null)
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "Choose a topic map…"), topics.map(tp => /*#__PURE__*/React.createElement("option", {
+    key: tp.id,
+    value: tp.id
+  }, tp.name))), /*#__PURE__*/React.createElement("button", {
+    className: "tb-btn",
+    onClick: () => setTopicsOpen(true)
+  }, "Manage"), /*#__PURE__*/React.createElement("button", {
+    className: "tb-btn",
+    onClick: () => setRightOpen(false),
+    title: "Hide"
+  }, "✕")), rightTopic ? /*#__PURE__*/React.createElement("div", {
+    className: "map-mini"
+  }, /*#__PURE__*/React.createElement(TopicMap, {
+    key: rightTopic.id,
+    embedded: true,
+    theme: t,
+    font: font,
+    topicName: rightTopic.name,
+    root: rightTopic.root,
+    setRoot: updater => setTopics(prev => prev.map(tp => tp.id === rightTopic.id ? {
+      ...tp,
+      root: typeof updater === "function" ? updater(tp.root) : updater
+    } : tp)),
+    onInsert: txt => insertAtCursor(txt),
+    phrases: phrases,
+    onSavePhrase: addPhrase
+  })) : /*#__PURE__*/React.createElement("div", {
+    className: "map-mini-empty"
+  }, topics.length === 0 ? "No topics yet. Open Topics to create one, then it appears here while you write." : "Pick a topic above to keep its map beside your lyrics.")) : /*#__PURE__*/React.createElement("div", {
+    className: "lw-rail"
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "rail-btn",
+    onClick: () => setRightOpen(true)
+  }, "Topic map")))), topicsOpen && activeTopicId === null && /*#__PURE__*/React.createElement(TopicsPage, {
     theme: t,
     font: font,
     songTitle: title,
