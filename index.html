@@ -160,6 +160,7 @@ window.Store = {
 <script>
 (function () {
   function startLyricWriter() {
+
 const {
   useState,
   useEffect,
@@ -438,6 +439,15 @@ function makeTopic(name) {
 }
 
 // Accepts: new topics array, older single-tree {root}, or oldest four-bucket shape.
+function normalizeOneTopic(t) {
+  return {
+    id: t.id || makeTopic("").id,
+    name: t.name || "Untitled topic",
+    root: normalizeNodes(t.root),
+    date: t.date || Date.now(),
+  };
+}
+
 function normalizeTopics(data) {
   if (Array.isArray(data)) {
     return data.map(t => ({
@@ -628,118 +638,120 @@ function buildLayout(rootChildren, rootLabel) {
 function countAllNodes(nodes) {
   return (nodes || []).reduce((s, n) => s + 1 + countAllNodes(n.children), 0);
 }
+let collSeq = 0;
+function makeCollection(name) {
+  collSeq += 1;
+  return {
+    id: `c${Date.now()}_${collSeq}`,
+    name,
+    topicIds: [],
+    date: Date.now()
+  };
+}
+
+// Build one tree from several topics so a collection can be seen as a whole.
+function combineTopics(collection, topics) {
+  const members = (collection.topicIds || []).map(id => topics.find(t => t.id === id)).filter(Boolean);
+  return members.map(t => ({
+    id: "col_" + t.id,
+    text: t.name,
+    children: t.root || []
+  }));
+}
 function TopicsPage({
   theme: t,
   font,
-  songTitle,
   topics,
   setTopics,
-  onOpen,
+  collections,
+  setCollections,
+  onOpenTopic,
+  onOpenCollection,
   onClose
 }) {
-  const [newName, setNewName] = useState("");
+  const [newTopic, setNewTopic] = useState("");
+  const [newColl, setNewColl] = useState("");
   const [editingId, setEditingId] = useState(null);
   const [editVal, setEditVal] = useState("");
+  const [dragId, setDragId] = useState(null);
+  const [overId, setOverId] = useState(null);
+  const [assignFor, setAssignFor] = useState(null);
+  const unfiled = topics.filter(tp => !collections.some(c => (c.topicIds || []).indexOf(tp.id) >= 0));
   function addTopic() {
-    const val = newName.trim();
-    if (!val) return;
-    setTopics(prev => [...prev, makeTopic(val)]);
-    setNewName("");
+    const v = newTopic.trim();
+    if (!v) return;
+    setTopics(prev => [...prev, makeTopic(v)]);
+    setNewTopic("");
+  }
+  function addCollection() {
+    const v = newColl.trim();
+    if (!v) return;
+    setCollections(prev => [...prev, makeCollection(v)]);
+    setNewColl("");
   }
   function renameTopic(id) {
-    const val = editVal.trim();
-    if (!val) {
-      setEditingId(null);
-      return;
-    }
-    setTopics(prev => prev.map(x => x.id === id ? {
+    const v = editVal.trim();
+    if (v) setTopics(prev => prev.map(x => x.id === id ? {
       ...x,
-      name: val
+      name: v
+    } : x));
+    setEditingId(null);
+  }
+  function renameCollection(id) {
+    const v = editVal.trim();
+    if (v) setCollections(prev => prev.map(x => x.id === id ? {
+      ...x,
+      name: v
     } : x));
     setEditingId(null);
   }
   function deleteTopic(id) {
     setTopics(prev => prev.filter(x => x.id !== id));
+    setCollections(prev => prev.map(c => ({
+      ...c,
+      topicIds: (c.topicIds || []).filter(i => i !== id)
+    })));
   }
-  return /*#__PURE__*/React.createElement("div", {
-    className: "tp-overlay"
-  }, /*#__PURE__*/React.createElement("style", null, `
-        .tp-overlay{position:fixed;inset:0;z-index:200;background:${t.bg};display:flex;flex-direction:column;
-          font-family:system-ui,sans-serif;overflow-y:auto;
-          padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom);
-          padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right);}
-        .tp-bar{background:${t.toolbar};border-bottom:1px solid ${t.border};padding:9px 14px;display:flex;
-          align-items:center;gap:8px;flex-shrink:0;min-height:52px;position:sticky;top:0;z-index:5;}
-        .tp-bar-title{font-size:12px;letter-spacing:.13em;text-transform:uppercase;color:${t.muted};font-weight:700;}
-        .tp-close{background:${t.accent};border:none;color:${t.accentText};padding:0 15px;height:30px;
-          font-size:12px;font-weight:700;border-radius:5px;cursor:pointer;margin-left:auto;white-space:nowrap;}
-        .tp-inner{max-width:620px;width:100%;margin:0 auto;padding:30px 20px 70px;}
-        .tp-sub{font-size:14px;color:${t.muted};margin-bottom:26px;line-height:1.65;}
-        .tp-addrow{display:flex;gap:8px;margin-bottom:30px;}
-        .tp-input{flex:1;background:${t.surface};border:1px solid ${t.border};color:${t.text};padding:12px 14px;
-          font-size:15px;border-radius:6px;outline:none;font-family:${font};min-width:0;}
-        .tp-input:focus{border-color:${t.accent};}
-        .tp-input::placeholder{color:${t.titlePlaceholder};font-family:system-ui,sans-serif;font-size:14px;}
-        .tp-add{background:${t.accent};border:none;color:${t.accentText};padding:0 20px;font-size:14px;
-          font-weight:700;border-radius:6px;cursor:pointer;white-space:nowrap;}
-        .tp-label{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:${t.muted};
-          font-weight:700;margin-bottom:12px;}
-        .tp-card{background:${t.surface};border:1px solid ${t.border};border-radius:8px;padding:16px;
-          margin-bottom:10px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;cursor:pointer;
-          transition:border-color .15s,box-shadow .15s,transform .12s;}
-        .tp-card:hover{border-color:${t.accent};box-shadow:0 3px 14px rgba(0,0,0,.18);transform:translateY(-1px);}
-        .tp-card-main{flex:1;min-width:120px;}
-        .tp-card-name{font-family:${font};font-size:19px;color:${t.text};line-height:1.3;word-break:break-word;}
-        .tp-card-meta{font-size:11px;color:${t.muted};margin-top:4px;}
-        .tp-card-acts{display:flex;align-items:center;gap:10px;flex-shrink:0;}
-        .tp-mini{display:flex;gap:2px;}
-        .tp-open{background:${t.accent};border:none;color:${t.accentText};padding:8px 14px;font-size:12px;
-          font-weight:700;border-radius:5px;cursor:pointer;white-space:nowrap;}
-        .tp-open:hover{opacity:.88;}
-        .tp-icon{background:transparent;border:1px solid transparent;color:${t.muted};cursor:pointer;
-          font-size:12px;padding:5px 8px;border-radius:4px;}
-        .tp-icon:hover{border-color:${t.border};color:${t.text};}
-        .tp-icon.danger:hover{background:#e53935;border-color:#e53935;color:#fff;}
-        .tp-editrow{display:flex;gap:6px;flex:1;}
-        .tp-editinput{flex:1;background:${t.bg};border:1px solid ${t.accent};color:${t.text};padding:8px 10px;
-          font-size:15px;border-radius:5px;outline:none;font-family:${font};min-width:0;}
-        .tp-empty{border:1px dashed ${t.border};border-radius:8px;padding:36px 22px;text-align:center;
-          color:${t.muted};font-size:13px;line-height:1.75;}
-      `), /*#__PURE__*/React.createElement("div", {
-    className: "tp-bar"
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "tp-bar-title"
-  }, "Topics"), /*#__PURE__*/React.createElement("button", {
-    className: "tp-close",
-    onClick: onClose
-  }, "Back to lyrics")), /*#__PURE__*/React.createElement("div", {
-    className: "tp-inner"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "tp-sub"
-  }, "Name the things you want to write around. Open any topic to build its association map."), /*#__PURE__*/React.createElement("div", {
-    className: "tp-addrow"
-  }, /*#__PURE__*/React.createElement("input", {
-    className: "tp-input",
-    value: newName,
-    onChange: e => setNewName(e.target.value),
-    onKeyDown: e => {
-      if (e.key === "Enter") addTopic();
-    },
-    placeholder: "Name a topic to explore..."
-  }), /*#__PURE__*/React.createElement("button", {
-    className: "tp-add",
-    onClick: addTopic
-  }, "Create")), topics.length === 0 ? /*#__PURE__*/React.createElement("div", {
-    className: "tp-empty"
-  }, "No topics yet.", /*#__PURE__*/React.createElement("br", null), "Name something you want to write around — a feeling, a place, an object —", /*#__PURE__*/React.createElement("br", null), "and build the map of associations out from it.") : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
-    className: "tp-label"
-  }, topics.length, " topic", topics.length === 1 ? "" : "s"), topics.map(tp => {
+  function deleteCollection(id) {
+    setCollections(prev => prev.filter(x => x.id !== id));
+  }
+  function assign(topicId, collId) {
+    setCollections(prev => prev.map(c => {
+      const ids = (c.topicIds || []).filter(i => i !== topicId);
+      if (c.id === collId) ids.push(topicId);
+      return {
+        ...c,
+        topicIds: ids
+      };
+    }));
+    setAssignFor(null);
+  }
+  function unfile(topicId) {
+    setCollections(prev => prev.map(c => ({
+      ...c,
+      topicIds: (c.topicIds || []).filter(i => i !== topicId)
+    })));
+  }
+  function onDrop(collId) {
+    if (dragId) assign(dragId, collId);
+    setDragId(null);
+    setOverId(null);
+  }
+  function TopicChip({
+    tp,
+    inColl
+  }) {
     const count = countAllNodes(tp.root);
     const editing = editingId === tp.id;
     return /*#__PURE__*/React.createElement("div", {
-      key: tp.id,
-      className: "tp-card",
-      onClick: () => !editing && onOpen(tp.id)
+      className: `tp-chip${dragId === tp.id ? " dragging" : ""}`,
+      draggable: !editing,
+      onDragStart: () => setDragId(tp.id),
+      onDragEnd: () => {
+        setDragId(null);
+        setOverId(null);
+      },
+      onClick: () => !editing && onOpenTopic(tp.id)
     }, editing ? /*#__PURE__*/React.createElement("div", {
       className: "tp-editrow",
       onClick: e => e.stopPropagation()
@@ -756,34 +768,236 @@ function TopicsPage({
       className: "tp-icon",
       onClick: () => renameTopic(tp.id)
     }, "Save")) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
-      className: "tp-card-main"
+      className: "tp-chip-main"
     }, /*#__PURE__*/React.createElement("div", {
-      className: "tp-card-name"
+      className: "tp-chip-name"
     }, tp.name), /*#__PURE__*/React.createElement("div", {
-      className: "tp-card-meta"
-    }, count === 0 ? "empty — tap to start" : `${count} word${count === 1 ? "" : "s"} mapped`)), /*#__PURE__*/React.createElement("div", {
-      className: "tp-card-acts"
-    }, /*#__PURE__*/React.createElement("button", {
-      className: "tp-open",
-      onClick: e => {
-        e.stopPropagation();
-        onOpen(tp.id);
-      }
-    }, "Open map ›"), /*#__PURE__*/React.createElement("div", {
-      className: "tp-mini",
+      className: "tp-chip-meta"
+    }, count === 0 ? "empty" : `${count} word${count === 1 ? "" : "s"}`)), /*#__PURE__*/React.createElement("div", {
+      className: "tp-chip-acts",
       onClick: e => e.stopPropagation()
     }, /*#__PURE__*/React.createElement("button", {
       className: "tp-icon",
+      title: "Put in a collection",
+      onClick: () => setAssignFor(assignFor === tp.id ? null : tp.id)
+    }, "⊞"), /*#__PURE__*/React.createElement("button", {
+      className: "tp-icon",
+      title: "Rename",
       onClick: () => {
         setEditVal(tp.name);
         setEditingId(tp.id);
       }
-    }, "Rename"), /*#__PURE__*/React.createElement("button", {
+    }, "✎"), inColl && /*#__PURE__*/React.createElement("button", {
+      className: "tp-icon",
+      title: "Remove from collection",
+      onClick: () => unfile(tp.id)
+    }, "↑"), /*#__PURE__*/React.createElement("button", {
       className: "tp-icon danger",
+      title: "Delete",
       onClick: () => deleteTopic(tp.id)
-    }, "Delete")))));
-  }))));
+    }, "×")), assignFor === tp.id && /*#__PURE__*/React.createElement("div", {
+      className: "tp-assign",
+      onClick: e => e.stopPropagation()
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "tp-assign-head"
+    }, "Move to"), collections.length === 0 ? /*#__PURE__*/React.createElement("div", {
+      className: "tp-assign-empty"
+    }, "No collections yet") : collections.map(c => /*#__PURE__*/React.createElement("button", {
+      key: c.id,
+      className: "tp-assign-opt",
+      onClick: () => assign(tp.id, c.id)
+    }, c.name)), inColl && /*#__PURE__*/React.createElement("button", {
+      className: "tp-assign-opt",
+      onClick: () => {
+        unfile(tp.id);
+        setAssignFor(null);
+      }
+    }, "Loose topics"))));
+  }
+  return /*#__PURE__*/React.createElement("div", {
+    className: "tp-overlay"
+  }, /*#__PURE__*/React.createElement("style", null, `
+        .tp-overlay{position:fixed;inset:0;z-index:200;background:${t.bg};display:flex;flex-direction:column;
+          font-family:system-ui,sans-serif;overflow-y:auto;
+          padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom);
+          padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right);}
+        .tp-bar{background:${t.toolbar};border-bottom:1px solid ${t.border};padding:9px 14px;display:flex;
+          align-items:center;gap:8px;flex-shrink:0;min-height:52px;position:sticky;top:0;z-index:5;}
+        .tp-bar-title{font-size:12px;letter-spacing:.13em;text-transform:uppercase;color:${t.muted};font-weight:700;}
+        .tp-close{background:${t.accent};border:none;color:${t.accentText};padding:0 15px;height:30px;
+          font-size:12px;font-weight:700;border-radius:5px;cursor:pointer;margin-left:auto;white-space:nowrap;}
+        .tp-inner{max-width:1000px;width:100%;margin:0 auto;padding:26px 20px 80px;}
+        .tp-sub{font-size:13.5px;color:${t.muted};margin-bottom:24px;line-height:1.65;}
+        .tp-sec{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:${t.muted};
+          font-weight:700;margin:26px 0 12px;display:flex;align-items:center;gap:10px;}
+        .tp-sec:first-of-type{margin-top:0;}
+        .tp-sec::after{content:"";flex:1;height:1px;background:${t.border};}
+        .tp-addrow{display:flex;gap:8px;margin-bottom:18px;}
+        .tp-input{flex:1;background:${t.surface};border:1px solid ${t.border};color:${t.text};padding:11px 13px;
+          font-size:14.5px;border-radius:6px;outline:none;font-family:${font};min-width:0;}
+        .tp-input:focus{border-color:${t.accent};}
+        .tp-input::placeholder{color:${t.titlePlaceholder};font-family:system-ui,sans-serif;font-size:13.5px;}
+        .tp-add{background:${t.accent};border:none;color:${t.accentText};padding:0 18px;font-size:13px;
+          font-weight:700;border-radius:6px;cursor:pointer;white-space:nowrap;}
+
+        .coll{border:1px solid ${t.border};border-radius:10px;background:${t.surface};margin-bottom:14px;
+          transition:border-color .15s,box-shadow .15s;}
+        .coll.over{border-color:${t.accent};box-shadow:0 0 0 3px ${t.accent}33;}
+        .coll-head{display:flex;align-items:center;gap:10px;padding:14px 15px;border-bottom:1px solid ${t.border};}
+        .coll-name{font-family:${font};font-size:19px;color:${t.text};flex:1;min-width:0;word-break:break-word;}
+        .coll-meta{font-size:11px;color:${t.muted};}
+        .coll-body{padding:12px 15px 15px;display:flex;flex-wrap:wrap;gap:9px;min-height:56px;}
+        .coll-drop{width:100%;text-align:center;color:${t.muted};font-size:12px;padding:12px 0;
+          border:1px dashed ${t.border};border-radius:7px;line-height:1.6;}
+
+        .tp-chip{position:relative;background:${t.bg};border:1px solid ${t.border};border-radius:8px;
+          padding:11px 12px;display:flex;align-items:center;gap:9px;cursor:pointer;min-width:190px;
+          transition:border-color .14s,transform .12s,opacity .14s;}
+        .tp-chip:hover{border-color:${t.accent};transform:translateY(-1px);}
+        .tp-chip.dragging{opacity:.4;}
+        .tp-chip-main{flex:1;min-width:0;}
+        .tp-chip-name{font-family:${font};font-size:16px;color:${t.text};line-height:1.3;word-break:break-word;}
+        .tp-chip-meta{font-size:10.5px;color:${t.muted};margin-top:2px;}
+        .tp-chip-acts{display:flex;gap:1px;flex-shrink:0;}
+        .tp-icon{background:transparent;border:1px solid transparent;color:${t.muted};cursor:pointer;
+          font-size:13px;padding:4px 6px;border-radius:4px;line-height:1;}
+        .tp-icon:hover{border-color:${t.border};color:${t.text};}
+        .tp-icon.danger:hover{background:#e53935;border-color:#e53935;color:#fff;}
+        .tp-open{background:${t.accent};border:none;color:${t.accentText};padding:7px 13px;font-size:11.5px;
+          font-weight:700;border-radius:5px;cursor:pointer;white-space:nowrap;}
+        .tp-open:hover{opacity:.88;}
+        .tp-editrow{display:flex;gap:6px;flex:1;}
+        .tp-editinput{flex:1;background:${t.surface};border:1px solid ${t.accent};color:${t.text};padding:7px 9px;
+          font-size:14px;border-radius:5px;outline:none;font-family:${font};min-width:0;}
+        .tp-assign{position:absolute;top:calc(100% + 5px);right:0;background:${t.toolbar};
+          border:1px solid ${t.accent};border-radius:7px;padding:7px;z-index:20;min-width:170px;
+          box-shadow:0 8px 24px rgba(0,0,0,.35);}
+        .tp-assign-head{font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:${t.muted};
+          font-weight:700;padding:3px 6px 6px;}
+        .tp-assign-opt{display:block;width:100%;text-align:left;background:transparent;border:none;
+          color:${t.text};font-size:12.5px;padding:7px 8px;border-radius:4px;cursor:pointer;
+          font-family:system-ui,sans-serif;}
+        .tp-assign-opt:hover{background:${t.accent};color:${t.accentText};}
+        .tp-assign-empty{font-size:11.5px;color:${t.muted};padding:6px 8px;}
+        .tp-loose{display:flex;flex-wrap:wrap;gap:9px;}
+        .tp-empty{border:1px dashed ${t.border};border-radius:8px;padding:30px 22px;text-align:center;
+          color:${t.muted};font-size:13px;line-height:1.75;}
+      `), /*#__PURE__*/React.createElement("div", {
+    className: "tp-bar"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "tp-bar-title"
+  }, "Topics & Collections"), /*#__PURE__*/React.createElement("button", {
+    className: "tp-close",
+    onClick: onClose
+  }, "Back to lyrics")), /*#__PURE__*/React.createElement("div", {
+    className: "tp-inner"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "tp-sub"
+  }, "Your topics are shared across every song. Group them into collections to see a concept or album whole."), /*#__PURE__*/React.createElement("div", {
+    className: "tp-sec"
+  }, "New"), /*#__PURE__*/React.createElement("div", {
+    className: "tp-addrow"
+  }, /*#__PURE__*/React.createElement("input", {
+    className: "tp-input",
+    value: newTopic,
+    onChange: e => setNewTopic(e.target.value),
+    onKeyDown: e => {
+      if (e.key === "Enter") addTopic();
+    },
+    placeholder: "Name a topic…"
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "tp-add",
+    onClick: addTopic
+  }, "Add topic")), /*#__PURE__*/React.createElement("div", {
+    className: "tp-addrow"
+  }, /*#__PURE__*/React.createElement("input", {
+    className: "tp-input",
+    value: newColl,
+    onChange: e => setNewColl(e.target.value),
+    onKeyDown: e => {
+      if (e.key === "Enter") addCollection();
+    },
+    placeholder: "Name a collection — an album, a concept…"
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "tp-add",
+    onClick: addCollection
+  }, "Add collection")), collections.length > 0 && /*#__PURE__*/React.createElement("div", {
+    className: "tp-sec"
+  }, "Collections"), collections.map(c => {
+    const members = (c.topicIds || []).map(id => topics.find(x => x.id === id)).filter(Boolean);
+    const words = members.reduce((s, m) => s + countAllNodes(m.root), 0);
+    const editing = editingId === c.id;
+    return /*#__PURE__*/React.createElement("div", {
+      key: c.id,
+      className: `coll${overId === c.id ? " over" : ""}`,
+      onDragOver: e => {
+        e.preventDefault();
+        setOverId(c.id);
+      },
+      onDragLeave: () => setOverId(null),
+      onDrop: e => {
+        e.preventDefault();
+        onDrop(c.id);
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "coll-head"
+    }, editing ? /*#__PURE__*/React.createElement("div", {
+      className: "tp-editrow"
+    }, /*#__PURE__*/React.createElement("input", {
+      className: "tp-editinput",
+      value: editVal,
+      autoFocus: true,
+      onChange: e => setEditVal(e.target.value),
+      onKeyDown: e => {
+        if (e.key === "Enter") renameCollection(c.id);
+        if (e.key === "Escape") setEditingId(null);
+      }
+    }), /*#__PURE__*/React.createElement("button", {
+      className: "tp-icon",
+      onClick: () => renameCollection(c.id)
+    }, "Save")) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+      className: "coll-name"
+    }, c.name), /*#__PURE__*/React.createElement("span", {
+      className: "coll-meta"
+    }, members.length, " topic", members.length === 1 ? "" : "s", words ? ` · ${words} words` : ""), /*#__PURE__*/React.createElement("button", {
+      className: "tp-open",
+      disabled: !members.length,
+      style: {
+        opacity: members.length ? 1 : .4
+      },
+      onClick: () => members.length && onOpenCollection(c.id)
+    }, "Combined map ›"), /*#__PURE__*/React.createElement("button", {
+      className: "tp-icon",
+      title: "Rename",
+      onClick: () => {
+        setEditVal(c.name);
+        setEditingId(c.id);
+      }
+    }, "✎"), /*#__PURE__*/React.createElement("button", {
+      className: "tp-icon danger",
+      title: "Delete collection",
+      onClick: () => deleteCollection(c.id)
+    }, "×"))), /*#__PURE__*/React.createElement("div", {
+      className: "coll-body"
+    }, members.length === 0 ? /*#__PURE__*/React.createElement("div", {
+      className: "coll-drop"
+    }, "Drag a topic here, or use ⊞ on a topic to move it in.") : members.map(m => /*#__PURE__*/React.createElement(TopicChip, {
+      key: m.id,
+      tp: m,
+      inColl: true
+    }))));
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "tp-sec"
+  }, collections.length > 0 ? "Loose topics" : "Topics"), unfiled.length === 0 ? /*#__PURE__*/React.createElement("div", {
+    className: "tp-empty"
+  }, topics.length === 0 ? "No topics yet. Name something you want to write around — a feeling, a place, an object." : "Every topic is in a collection.") : /*#__PURE__*/React.createElement("div", {
+    className: "tp-loose"
+  }, unfiled.map(tp => /*#__PURE__*/React.createElement(TopicChip, {
+    key: tp.id,
+    tp: tp
+  })))));
 }
+
 function TopicMap({
   theme: t,
   font,
@@ -796,7 +1010,8 @@ function TopicMap({
   phrases,
   onSavePhrase,
   backLabel = "Topics",
-  embedded = false
+  embedded = false,
+  readOnly = false
 }) {
   const [offset, setOffset] = useState({
     x: 0,
@@ -1078,7 +1293,7 @@ function TopicMap({
       onClick: () => renameNode(entry, renameVal)
     }, "✓"))) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
       className: "tm-box-label"
-    }, entry.isRoot ? "Add to the map" : `Connects to "${entry.node.text}"`), /*#__PURE__*/React.createElement("div", {
+    }, readOnly ? entry.node.text : entry.isRoot ? "Add to the map" : `Connects to "${entry.node.text}"`), !readOnly && /*#__PURE__*/React.createElement("div", {
       className: "tm-box-row"
     }, /*#__PURE__*/React.createElement("input", {
       className: "tm-box-input",
@@ -1092,7 +1307,7 @@ function TopicMap({
     }), /*#__PURE__*/React.createElement("button", {
       className: "tm-box-add",
       onClick: () => addTo(entry, inputVal)
-    }, "+")), /*#__PURE__*/React.createElement("button", {
+    }, "+")), !readOnly && /*#__PURE__*/React.createElement("button", {
       className: "tm-link",
       onClick: () => setShowPhrases(v => !v)
     }, showPhrases ? "Hide saved phrases" : `Attach a saved phrase (${(phrases || []).length})`), showPhrases && /*#__PURE__*/React.createElement("div", {
@@ -1106,7 +1321,19 @@ function TopicMap({
         addTo(entry, ph.text);
         setShowPhrases(false);
       }
-    }, ph.text))), !entry.isRoot && /*#__PURE__*/React.createElement("div", {
+    }, ph.text))), !entry.isRoot && readOnly && /*#__PURE__*/React.createElement("div", {
+      className: "tm-box-acts"
+    }, /*#__PURE__*/React.createElement("button", {
+      className: "tm-box-btn",
+      onClick: () => onInsert(entry.node.text)
+    }, "Insert into lyrics"), /*#__PURE__*/React.createElement("button", {
+      className: "tm-box-btn",
+      onClick: () => {
+        onSavePhrase(entry.node.text);
+        setSavedFlash(true);
+        setTimeout(() => setSavedFlash(false), 1400);
+      }
+    }, savedFlash ? "Saved \u2713" : "Save phrase")), !entry.isRoot && !readOnly && /*#__PURE__*/React.createElement("div", {
       className: "tm-box-acts"
     }, /*#__PURE__*/React.createElement("button", {
       className: "tm-box-btn",
@@ -1504,6 +1731,9 @@ function LyricWriter({
   const [phraseError, setPhraseError] = useState("");
   const [activePhraseKey, setActivePhraseKey] = useState(null);
   const [topics, setTopics] = useState([]);
+  const [collections, setCollections] = useState([]);
+  const [activeCollectionId, setActiveCollectionId] = useState(null);
+  const topicsReady = useRef(false);
   const [topicsOpen, setTopicsOpen] = useState(false);
   const [activeTopicId, setActiveTopicId] = useState(null);
   const textRef = useRef(null);
@@ -1512,9 +1742,11 @@ function LyricWriter({
   const activeTopic = topics.find(tp => tp.id === activeTopicId) || null;
   const activePhrase = phrases.find(p => p.key === activePhraseKey) || null;
   const rightTopic = topics.find(tp => tp.id === rightTopicId) || null;
+  const activeCollection = collections.find(c => c.id === activeCollectionId) || null;
   useEffect(() => {
     refreshList();
     loadPhrases();
+    loadTopics();
   }, []);
   const songCache = useRef({});
   function applySongMap(all) {
@@ -1553,7 +1785,6 @@ function LyricWriter({
       italic,
       underline,
       pageWidth,
-      topics,
       date: Date.now()
     };
     try {
@@ -1607,7 +1838,6 @@ function LyricWriter({
       setItalic(!!d.italic);
       setUnderline(!!d.underline);
       setPageWidth(pw);
-      setTopics(normalizeTopics(d.topics ?? d.topic));
       setActiveTopicId(null);
       setTopicsOpen(false);
       skipAutosave.current = true;
@@ -1630,6 +1860,23 @@ function LyricWriter({
       refreshList();
     } catch {}
   }
+
+  // Topics and collections live outside any single song, so save them on their own.
+  useEffect(() => {
+    if (!topicsReady.current) return;
+    const id = setTimeout(() => {
+      topics.forEach(tp => { try { Store.set("topics", tp.id, tp); } catch (e) {} });
+    }, 600);
+    return () => clearTimeout(id);
+  }, [topics]);
+
+  useEffect(() => {
+    if (!topicsReady.current) return;
+    const id = setTimeout(() => {
+      collections.forEach(c => { try { Store.set("collections", c.id, c); } catch (e) {} });
+    }, 600);
+    return () => clearTimeout(id);
+  }, [collections]);
 
   // Autosave: save 1.5s after typing stops
   useEffect(() => {
@@ -1672,7 +1919,6 @@ function LyricWriter({
     setTitle("");
     setContent("");
     setCurrentKey(null);
-    setTopics([]);
     setActiveTopicId(null);
   }
   function switchTheme(k) {
@@ -1810,6 +2056,44 @@ function LyricWriter({
       lookupRhymes(word, rhymeMode);
     }
   }
+  async function loadTopics() {
+    try {
+      const localT = Store.listLocal("topics");
+      const localC = Store.listLocal("collections");
+      if (Object.keys(localT).length) setTopics(Object.values(localT).map(normalizeOneTopic));
+      if (Object.keys(localC).length) setCollections(Object.values(localC));
+    } catch (e) {}
+    try {
+      const [remoteT, remoteC] = await Promise.all([Store.list("topics"), Store.list("collections")]);
+      const list = Object.values(remoteT || {}).map(normalizeOneTopic);
+      setTopics(list);
+      setCollections(Object.values(remoteC || {}));
+      await migrateSongTopics(list);
+    } catch (e) { console.warn("Topic sync failed:", e); }
+    topicsReady.current = true;
+  }
+
+  // Older songs stored their topics inline. Lift them into the shared library once.
+  async function migrateSongTopics(existing) {
+    try {
+      const all = await Store.list("songs");
+      const have = new Set(existing.map(t => t.id));
+      const moved = [];
+      for (const [key, song] of Object.entries(all || {})) {
+        if (!song || !Array.isArray(song.topics) || !song.topics.length) continue;
+        for (const tp of normalizeTopics(song.topics)) {
+          if (!have.has(tp.id)) { have.add(tp.id); moved.push(tp); }
+        }
+        const { topics: _drop, ...rest } = song;
+        await Store.set("songs", key, rest);
+      }
+      if (moved.length) {
+        for (const tp of moved) await Store.set("topics", tp.id, tp);
+        setTopics(prev => [...prev, ...moved]);
+      }
+    } catch (e) { console.warn("Topic migration skipped:", e); }
+  }
+
   function applyPhraseMap(all) {
     const out = Object.entries(all || {}).map(([key, d]) => ({
       key,
@@ -2439,14 +2723,29 @@ function LyricWriter({
   }, /*#__PURE__*/React.createElement("button", {
     className: "rail-btn",
     onClick: () => setRightOpen(true)
-  }, "Topic map")))), topicsOpen && activeTopicId === null && /*#__PURE__*/React.createElement(TopicsPage, {
+  }, "Topic map")))), topicsOpen && activeTopicId === null && activeCollectionId === null && /*#__PURE__*/React.createElement(TopicsPage, {
     theme: t,
     font: font,
-    songTitle: title,
     topics: topics,
     setTopics: setTopics,
-    onOpen: id => setActiveTopicId(id),
+    collections: collections,
+    setCollections: setCollections,
+    onOpenTopic: id => setActiveTopicId(id),
+    onOpenCollection: id => setActiveCollectionId(id),
     onClose: () => setTopicsOpen(false)
+  }), topicsOpen && activeCollection && /*#__PURE__*/React.createElement(TopicMap, {
+    theme: t,
+    font: font,
+    topicName: activeCollection.name,
+    root: combineTopics(activeCollection, topics),
+    setRoot: () => {},
+    readOnly: true,
+    onBack: () => setActiveCollectionId(null),
+    onClose: () => { setTopicsOpen(false); setActiveCollectionId(null); },
+    onInsert: txt => { insertAtCursor(txt); setTopicsOpen(false); setActiveCollectionId(null); },
+    phrases: phrases,
+    onSavePhrase: addPhrase,
+    backLabel: "Topics"
   }), activePhrase && /*#__PURE__*/React.createElement(TopicMap, {
     theme: t,
     font: font,
