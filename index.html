@@ -2056,6 +2056,34 @@ function LyricWriter({
       lookupRhymes(word, rhymeMode);
     }
   }
+  // Make a topic out of a song title (reuse one if the name already exists).
+  function topicFromTitle(rawTitle) {
+    const name = (rawTitle || "").trim();
+    if (!name) return null;
+    const existing = topics.find(t => t.name.toLowerCase() === name.toLowerCase());
+    if (existing) return existing.id;
+    const tp = makeTopic(name);
+    tp.fromSong = true;
+    setTopics(prev => [...prev, tp]);
+    try { Store.set("topics", tp.id, tp); } catch (e) {}
+    return tp.id;
+  }
+
+  function mapSongAsTopic(rawTitle) {
+    const id = topicFromTitle(rawTitle);
+    if (!id) return;
+    setRightTopicId(id);
+    setRightOpen(true);
+  }
+
+  function openSongTopicFullscreen(rawTitle) {
+    const id = topicFromTitle(rawTitle);
+    if (!id) return;
+    setDrawerOpen(false);
+    setTopicsOpen(true);
+    setActiveTopicId(id);
+  }
+
   async function loadTopics() {
     try {
       const localT = Store.listLocal("topics");
@@ -2223,7 +2251,12 @@ function LyricWriter({
         .map-mini-head{padding:9px 12px;border-bottom:1px solid ${t.border};display:flex;align-items:center;gap:8px;}
         .map-mini-sel{flex:1;background:${t.surface};border:1px solid ${t.border};color:${t.text};
           padding:5px 8px;font-size:12px;border-radius:4px;outline:none;min-width:0;}
-        .map-mini-empty{padding:38px 22px;text-align:center;color:${t.muted};font-size:12.5px;line-height:1.7;}
+        .map-mini-empty{padding:38px 22px;text-align:center;color:${t.muted};font-size:12.5px;line-height:1.7;
+          display:flex;flex-direction:column;align-items:center;gap:16px;}
+        .map-this-btn{background:${t.accent};border:none;color:${t.accentText};padding:9px 16px;font-size:12.5px;
+          font-weight:700;border-radius:6px;cursor:pointer;max-width:100%;overflow:hidden;
+          text-overflow:ellipsis;white-space:nowrap;font-family:system-ui,sans-serif;}
+        .map-this-btn:hover{opacity:.88;}
         @media (max-width: 1100px){
           .lw-side.right,.lw-rail{display:none;}
         }
@@ -2312,7 +2345,12 @@ function LyricWriter({
           border-left:1px solid ${t.border};z-index:101;display:flex;flex-direction:column;
           box-shadow:-4px 0 24px rgba(0,0,0,.4);
           padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom);}
-        .lw-drawer-head{padding:16px 16px 12px;border-bottom:1px solid ${t.border};display:flex;align-items:center;justify-content:space-between;}
+        .lw-drawer-head{padding:16px 14px 12px;border-bottom:1px solid ${t.border};display:flex;align-items:center;
+          justify-content:space-between;gap:10px;flex-shrink:0;}
+        .lw-drawer-head .tb-btn{flex-shrink:0;}
+        .song-map{background:transparent;border:1px solid ${t.border};color:${t.muted};cursor:pointer;
+          font-size:10.5px;padding:4px 8px;border-radius:4px;flex-shrink:0;letter-spacing:.05em;}
+        .song-map:hover{background:${t.accent};border-color:${t.accent};color:${t.accentText};}
         .lw-drawer-title{font-size:13px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:${t.text};}
         .lw-drawer-list{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:6px;}
         .song-row{padding:12px;border:1px solid ${t.border};border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;}
@@ -2718,7 +2756,14 @@ function LyricWriter({
     onSavePhrase: addPhrase
   })) : /*#__PURE__*/React.createElement("div", {
     className: "map-mini-empty"
-  }, topics.length === 0 ? "No topics yet. Open Topics to create one, then it appears here while you write." : "Pick a topic above to keep its map beside your lyrics.")) : /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("div", null,
+      topics.length === 0
+        ? "No topics yet — map this song's title to start one."
+        : "Pick a topic above, or map this song's title."),
+     title.trim() && /*#__PURE__*/React.createElement("button", {
+       className: "map-this-btn",
+       onClick: () => mapSongAsTopic(title)
+     }, `Map "${title.trim()}"`))) : /*#__PURE__*/React.createElement("div", {
     className: "lw-rail"
   }, /*#__PURE__*/React.createElement("button", {
     className: "rail-btn",
@@ -2811,6 +2856,10 @@ function LyricWriter({
   }, song.title), /*#__PURE__*/React.createElement("div", {
     className: "song-row-date"
   }, formatDate(song.date))), /*#__PURE__*/React.createElement("button", {
+    className: "song-map",
+    title: "Mind-map this title",
+    onClick: e => { e.stopPropagation(); openSongTopicFullscreen(song.title); }
+  }, "Map"), /*#__PURE__*/React.createElement("button", {
     className: "song-del",
     onClick: e => handleDelete(e, song.key)
   }, "×")))), /*#__PURE__*/React.createElement("button", {
